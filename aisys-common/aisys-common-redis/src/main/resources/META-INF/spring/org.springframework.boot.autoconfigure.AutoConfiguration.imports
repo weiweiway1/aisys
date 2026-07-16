@@ -1,0 +1,2 @@
+com.aisys.common.redis.config.RedisConfig
+com.aisys.common.redis.config.RedisLockAutoConfiguration

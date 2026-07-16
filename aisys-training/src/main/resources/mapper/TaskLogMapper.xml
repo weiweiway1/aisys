@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.training.mapper.TaskLogMapper">
+
+    <resultMap id="logMap" type="com.aisys.training.entity.TaskLog">
+        <id property="id" column="id"/>
+        <result property="taskId" column="task_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="level" column="level"/>
+        <result property="step" column="step"/>
+        <result property="message" column="message"/>
+        <result property="loggedAt" column="logged_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, task_id, tenant_id, level, step, message, logged_at
+    </sql>
+
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO task_log (task_id, tenant_id, level, step, message, logged_at) VALUES
+        <foreach collection="items" item="it" separator=",">
+            (#{it.taskId}, #{it.tenantId}, #{it.level}, #{it.step}, #{it.message},
+             COALESCE(#{it.loggedAt}, NOW()))
+        </foreach>
+    </insert>
+
+    <select id="countByTaskId" resultType="long">
+        SELECT COUNT(*) FROM task_log WHERE task_id = #{taskId}
+    </select>
+
+    <select id="pageByTaskId" resultMap="logMap">
+        SELECT <include refid="cols"/> FROM task_log WHERE task_id = #{taskId}
+        ORDER BY logged_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+</mapper>

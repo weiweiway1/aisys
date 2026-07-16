@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.auth.mapper.UserMapper">
+
+    <resultMap id="userMap" type="com.aisys.auth.entity.User">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="username" column="username"/>
+        <result property="email" column="email"/>
+        <result property="phone" column="phone"/>
+        <result property="passwordHash" column="password_hash"/>
+        <result property="nickname" column="nickname"/>
+        <result property="status" column="status"/>
+        <result property="lastLoginAt" column="last_login_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, username, email, phone, password_hash, nickname, status,
+        last_login_at, created_at, updated_at
+    </sql>
+
+    <select id="selectByUsername" resultMap="userMap">
+        SELECT <include refid="cols"/> FROM aisys_user WHERE username = #{username}
+    </select>
+
+    <select id="selectById" resultMap="userMap">
+        SELECT <include refid="cols"/> FROM aisys_user WHERE id = #{id}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM aisys_user
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="keyword != null and keyword != ''">
+                AND (username ILIKE '%' || #{keyword} || '%' OR email ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(nickname,'') ILIKE '%' || #{keyword} || '%')
+            </if>
+        </where>
+    </select>
+
+    <select id="page" resultMap="userMap">
+        SELECT <include refid="cols"/> FROM aisys_user
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="keyword != null and keyword != ''">
+                AND (username ILIKE '%' || #{keyword} || '%' OR email ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(nickname,'') ILIKE '%' || #{keyword} || '%')
+            </if>
+        </where>
+        ORDER BY created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.auth.entity.User" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO aisys_user (tenant_id, username, email, phone, password_hash, nickname, status)
+        VALUES (#{tenantId}, #{username}, #{email}, #{phone}, #{passwordHash}, #{nickname},
+                COALESCE(#{status}, 'active'))
+    </insert>
+
+    <update id="update" parameterType="com.aisys.auth.entity.User">
+        UPDATE aisys_user
+        <set>
+            <if test="email != null">email = #{email},</if>
+            <if test="phone != null">phone = #{phone},</if>
+            <if test="nickname != null">nickname = #{nickname},</if>
+            <if test="status != null">status = #{status},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="updatePassword">
+        UPDATE aisys_user SET password_hash = #{passwordHash}, updated_at = NOW() WHERE id = #{id}
+    </update>
+
+    <update id="updateLastLogin">
+        UPDATE aisys_user SET last_login_at = NOW(), updated_at = NOW() WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE aisys_user SET status = #{status}, updated_at = NOW() WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM aisys_user WHERE id = #{id}
+    </delete>
+
+    <select id="selectRolesByUserId" resultType="com.aisys.auth.entity.Role">
+        SELECT r.id, r.code, r.name, r.description, r.is_system AS isSystem, r.created_at AS createdAt
+        FROM role r JOIN user_role ur ON ur.role_id = r.id
+        WHERE ur.user_id = #{userId}
+    </select>
+
+    <select id="selectRoleCodesByUserId" resultType="string">
+        SELECT r.code FROM role r JOIN user_role ur ON ur.role_id = r.id WHERE ur.user_id = #{userId}
+    </select>
+
+    <select id="selectPermissionCodesByUserId" resultType="string">
+        SELECT DISTINCT p.code
+        FROM permission p
+        JOIN role_permission rp ON rp.permission_id = p.id
+        JOIN user_role ur ON ur.role_id = rp.role_id
+        WHERE ur.user_id = #{userId}
+    </select>
+
+    <insert id="insertUserRole">
+        INSERT INTO user_role (user_id, role_id) VALUES (#{userId}, #{roleId})
+        ON CONFLICT DO NOTHING
+    </insert>
+
+    <delete id="deleteUserRoles">
+        DELETE FROM user_role WHERE user_id = #{userId}
+    </delete>
+
+    <insert id="replaceRoles">
+        INSERT INTO user_role (user_id, role_id) VALUES
+        <foreach collection="roleIds" item="rid" separator=",">(#{userId}, #{rid})</foreach>
+        ON CONFLICT DO NOTHING
+    </insert>
+</mapper>

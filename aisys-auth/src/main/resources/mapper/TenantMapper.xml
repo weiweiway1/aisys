@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.auth.mapper.TenantMapper">
+
+    <resultMap id="tenantMap" type="com.aisys.auth.entity.Tenant">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="code" column="code"/>
+        <result property="status" column="status"/>
+        <result property="storagePoolId" column="storage_pool_id"/>
+        <result property="maxQuotaBytes" column="max_quota_bytes"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">id, name, code, status, storage_pool_id, max_quota_bytes, created_at, updated_at</sql>
+
+    <select id="selectById" resultMap="tenantMap">
+        SELECT <include refid="cols"/> FROM tenant WHERE id = #{id}
+    </select>
+
+    <select id="selectByCode" resultMap="tenantMap">
+        SELECT <include refid="cols"/> FROM tenant WHERE code = #{code}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM tenant
+        <where>
+            <if test="keyword != null and keyword != ''">AND (name ILIKE '%' || #{keyword} || '%' OR code ILIKE '%' || #{keyword} || '%')</if>
+        </where>
+    </select>
+
+    <select id="page" resultMap="tenantMap">
+        SELECT <include refid="cols"/> FROM tenant
+        <where>
+            <if test="keyword != null and keyword != ''">AND (name ILIKE '%' || #{keyword} || '%' OR code ILIKE '%' || #{keyword} || '%')</if>
+        </where>
+        ORDER BY created_at DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.auth.entity.Tenant" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO tenant (name, code, status, storage_pool_id, max_quota_bytes)
+        VALUES (#{name}, #{code}, COALESCE(#{status}, 'active'), #{storagePoolId}, #{maxQuotaBytes})
+    </insert>
+
+    <update id="update" parameterType="com.aisys.auth.entity.Tenant">
+        UPDATE tenant
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="storagePoolId != null">storage_pool_id = #{storagePoolId},</if>
+            <if test="maxQuotaBytes != null">max_quota_bytes = #{maxQuotaBytes},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM tenant WHERE id = #{id}
+    </delete>
+</mapper>

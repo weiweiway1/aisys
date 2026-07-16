@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.model.mapper.ModelMapper">
+
+    <resultMap id="modelMap" type="com.aisys.model.entity.Model">
+        <id     property="id"          column="id"/>
+        <result property="tenantId"    column="tenant_id"/>
+        <result property="projectId"   column="project_id"/>
+        <result property="name"        column="name"/>
+        <result property="type"        column="type"/>
+        <result property="framework"   column="framework"/>
+        <result property="description" column="description"/>
+        <result property="tags"        column="tags"/>
+        <result property="status"      column="status"/>
+        <result property="visibility"  column="visibility"/>
+        <result property="createdBy"   column="created_by"/>
+        <result property="createdAt"   column="created_at"/>
+        <result property="updatedAt"   column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, project_id, name, type, framework, description,
+        tags::text AS tags, status, visibility, created_by, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="modelMap">
+        SELECT <include refid="cols"/> FROM model WHERE id = #{id}
+    </select>
+
+    <select id="selectByName" resultMap="modelMap">
+        SELECT <include refid="cols"/> FROM model WHERE name = #{name} LIMIT 1
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM model
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (name ILIKE '%' || #{keyword} || '%' OR COALESCE(description,'') ILIKE '%' || #{keyword} || '%')
+            </if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="projectId != null">AND project_id = #{projectId}</if>
+        </where>
+    </select>
+
+    <select id="page" resultMap="modelMap">
+        SELECT <include refid="cols"/> FROM model
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (name ILIKE '%' || #{keyword} || '%' OR COALESCE(description,'') ILIKE '%' || #{keyword} || '%')
+            </if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="projectId != null">AND project_id = #{projectId}</if>
+        </where>
+        ORDER BY updated_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.model.entity.Model"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO model (tenant_id, project_id, name, type, framework, description, tags, status, visibility, created_by)
+        VALUES (#{tenantId}, #{projectId}, #{name}, #{type}, #{framework}, #{description},
+                <choose>
+                    <when test="tags != null">CAST(#{tags} AS JSONB)</when>
+                    <otherwise>NULL</otherwise>
+                </choose>,
+                COALESCE(#{status}, 'draft'), COALESCE(#{visibility}, 'private'), #{createdBy})
+    </insert>
+
+    <update id="update" parameterType="com.aisys.model.entity.Model">
+        UPDATE model
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="projectId != null">project_id = #{projectId},</if>
+            <if test="type != null">type = #{type},</if>
+            <if test="framework != null">framework = #{framework},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="tags != null">tags = CAST(#{tags} AS JSONB),</if>
+            <if test="visibility != null">visibility = #{visibility},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE model SET status = #{status}, updated_at = NOW() WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM model WHERE id = #{id}
+    </delete>
+
+    <!-- 跨服务删除存储对象前缀：读取该模型所有版本的 storage_path（RLS 内执行） -->
+    <select id="selectVersionStoragePaths" resultType="string">
+        SELECT storage_path FROM model_version WHERE model_id = #{modelId} AND storage_path IS NOT NULL
+    </select>
+</mapper>

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.storage.mapper.UploadTaskMapper">
+
+    <resultMap id="taskMap" type="com.aisys.storage.entity.UploadTask">
+        <id     property="id"              column="id"/>
+        <result property="tenantId"        column="tenant_id"/>
+        <result property="poolId"          column="pool_id"/>
+        <result property="relativePath"    column="relative_path"/>
+        <result property="fileName"        column="file_name"/>
+        <result property="sizeBytes"       column="size_bytes"/>
+        <result property="chunkSize"       column="chunk_size"/>
+        <result property="totalChunks"     column="total_chunks"/>
+        <result property="receivedChunks"  column="received_chunks"/>
+        <result property="status"          column="status"/>
+        <result property="uploadId"        column="upload_id"/>
+        <result property="bucket"          column="bucket"/>
+        <result property="finalKey"        column="final_key"/>
+        <result property="errorMsg"        column="error_msg"/>
+        <result property="parts"           column="parts"/>
+        <result property="createdBy"       column="created_by"/>
+        <result property="createdAt"       column="created_at"/>
+        <result property="updatedAt"       column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, pool_id, relative_path, file_name, size_bytes, chunk_size, total_chunks,
+        received_chunks, status, upload_id, bucket, final_key, error_msg, parts, created_by, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.storage.entity.UploadTask" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO upload_task (tenant_id, pool_id, relative_path, file_name, size_bytes, chunk_size, total_chunks,
+                                 received_chunks, status, upload_id, bucket, created_by)
+        VALUES (#{tenantId}, #{poolId}, #{relativePath}, #{fileName}, #{sizeBytes}, #{chunkSize}, #{totalChunks},
+                0, #{status}, #{uploadId}, #{bucket}, #{createdBy})
+    </insert>
+
+    <select id="selectById" resultMap="taskMap">
+        SELECT <include refid="cols"/> FROM upload_task WHERE id = #{id}
+    </select>
+
+    <select id="list" resultMap="taskMap">
+        SELECT <include refid="cols"/> FROM upload_task
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+        </where>
+        ORDER BY created_at DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM upload_task
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+        </where>
+    </select>
+
+    <!-- 幂等收片：parts 以 partNumber 为键存成 JSONB 对象，重传同一片会覆盖而非追加；
+         received_chunks 仅在新片时 +1（用 jsonb_exists 判断键是否已存在 —— 不能用 `?` 操作符，会与 JDBC 参数占位符冲突）。返回更新后的 received_chunks。 -->
+    <select id="addPart" resultType="java.lang.Integer">
+        UPDATE upload_task
+        SET parts = COALESCE(parts, '{}'::jsonb)
+                    || jsonb_build_object(CAST(#{partNumber} AS text),
+                           jsonb_build_object('partNumber', #{partNumber}, 'etag', #{etag})),
+            received_chunks = received_chunks + 1
+                    - (CASE WHEN jsonb_exists(COALESCE(parts, '{}'::jsonb), CAST(#{partNumber} AS text)) THEN 1 ELSE 0 END),
+            updated_at = NOW()
+        WHERE id = #{id}
+        RETURNING received_chunks
+    </select>
+
+    <update id="updateStatus">
+        UPDATE upload_task
+        SET status = #{status},
+            error_msg = #{errorMsg},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="complete">
+        UPDATE upload_task
+        SET status = #{status},
+            final_key = #{finalKey},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+</mapper>

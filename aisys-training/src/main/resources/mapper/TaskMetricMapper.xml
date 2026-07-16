@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.training.mapper.TaskMetricMapper">
+
+    <resultMap id="metricMap" type="com.aisys.training.entity.TaskMetric">
+        <id property="id" column="id"/>
+        <result property="taskId" column="task_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="ts" column="ts"/>
+        <result property="step" column="step"/>
+        <result property="metrics" column="metrics"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, task_id, tenant_id, ts, step, metrics::text AS metrics
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.training.entity.TaskMetric"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO task_metric (task_id, tenant_id, ts, step, metrics)
+        VALUES (#{taskId}, #{tenantId}, COALESCE(#{ts}, NOW()), #{step},
+                <choose><when test="metrics != null">CAST(#{metrics} AS JSONB)</when><otherwise>NULL</otherwise></choose>)
+    </insert>
+
+    <select id="countByTaskIdAndRange" resultType="long">
+        SELECT COUNT(*) FROM task_metric
+        WHERE task_id = #{taskId}
+        <if test="from != null">AND ts &gt;= #{from}</if>
+        <if test="to != null">AND ts &lt;= #{to}</if>
+    </select>
+
+    <select id="pageByTaskIdAndRange" resultMap="metricMap">
+        SELECT <include refid="cols"/> FROM task_metric
+        WHERE task_id = #{taskId}
+        <if test="from != null">AND ts &gt;= #{from}</if>
+        <if test="to != null">AND ts &lt;= #{to}</if>
+        ORDER BY ts DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+</mapper>

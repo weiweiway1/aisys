@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.common.mq.outbox.OutboxMapper">
+
+    <insert id="insert" parameterType="com.aisys.common.mq.outbox.OutboxRecord"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO event_outbox (producer, aggregate_type, aggregate_id, topic, routing_key,
+                                  payload, tenant_id, status, created_at)
+        VALUES (#{producer}, #{aggregateType}, #{aggregateId}, #{topic}, #{routingKey},
+                CAST(#{payload} AS JSONB), #{tenantId}, 'pending', NOW())
+    </insert>
+
+    <select id="selectPendingForUpdate" resultType="com.aisys.common.mq.outbox.OutboxRecord">
+        SELECT id, producer, aggregate_type AS aggregateType, aggregate_id AS aggregateId,
+               topic, routing_key AS routingKey,
+               payload::text AS payload, tenant_id AS tenantId, status,
+               created_at AS createdAt, sent_at AS sentAt
+        FROM event_outbox
+        WHERE producer = #{producer} AND status = 'pending'
+        ORDER BY id ASC
+        LIMIT #{limit}
+        FOR UPDATE SKIP LOCKED
+    </select>
+
+    <update id="markSent">
+        UPDATE event_outbox SET status = 'sent', sent_at = NOW() WHERE id = #{id}
+    </update>
+
+    <update id="markFailed">
+        UPDATE event_outbox SET status = 'failed' WHERE id = #{id}
+    </update>
+</mapper>

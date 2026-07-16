@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.common.log.mapper.AuditLogMapper">
+
+    <insert id="insert">
+        INSERT INTO audit_log (tenant_id, actor_type, user_id, username, action,
+                               resource, resource_id, detail, ip_address, user_agent)
+        VALUES (#{tenantId}, #{actorType}, #{userId}, #{username}, #{action},
+                #{resource}, #{resourceId},
+                <choose>
+                    <when test="detail != null">CAST(#{detail} AS JSONB)</when>
+                    <otherwise>NULL</otherwise>
+                </choose>,
+                <choose>
+                    <when test="ip != null">CAST(#{ip} AS INET)</when>
+                    <otherwise>NULL</otherwise>
+                </choose>,
+                #{userAgent})
+    </insert>
+</mapper>

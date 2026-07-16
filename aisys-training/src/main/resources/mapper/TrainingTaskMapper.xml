@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.training.mapper.TrainingTaskMapper">
+
+    <resultMap id="taskMap" type="com.aisys.training.entity.TrainingTask">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="projectId" column="project_id"/>
+        <result property="name" column="name"/>
+        <result property="modelVersionId" column="model_version_id"/>
+        <result property="datasetVersionId" column="dataset_version_id"/>
+        <result property="image" column="image"/>
+        <result property="command" column="command"/>
+        <result property="resourceSpec" column="resource_spec"/>
+        <result property="hyperparameters" column="hyperparameters"/>
+        <result property="containerSpec" column="container_spec"/>
+        <result property="status" column="status"/>
+        <result property="priority" column="priority"/>
+        <result property="assignedNodeId" column="assigned_node_id"/>
+        <result property="progress" column="progress"/>
+        <result property="errorMessage" column="error_message"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="completedAt" column="completed_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, project_id, name, model_version_id, dataset_version_id, image, command,
+        resource_spec::text AS resource_spec, hyperparameters::text AS hyperparameters,
+        container_spec::text AS container_spec,
+        status, priority, assigned_node_id, progress, error_message,
+        started_at, completed_at, created_by, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.training.entity.TrainingTask"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO training_task (tenant_id, project_id, name, model_version_id, dataset_version_id,
+                                   image, command, resource_spec, hyperparameters, container_spec, status, priority,
+                                   assigned_node_id, progress, created_by)
+        VALUES (#{tenantId}, #{projectId}, #{name}, #{modelVersionId}, #{datasetVersionId},
+                #{image}, #{command},
+                <choose><when test="resourceSpec != null">CAST(#{resourceSpec} AS JSONB)</when><otherwise>NULL</otherwise></choose>,
+                <choose><when test="hyperparameters != null">CAST(#{hyperparameters} AS JSONB)</when><otherwise>NULL</otherwise></choose>,
+                <choose><when test="containerSpec != null">CAST(#{containerSpec} AS JSONB)</when><otherwise>NULL</otherwise></choose>,
+                COALESCE(#{status}, 'pending'), COALESCE(#{priority}, 0),
+                #{assignedNodeId}, COALESCE(#{progress}, 0), #{createdBy})
+    </insert>
+
+    <update id="update" parameterType="com.aisys.training.entity.TrainingTask">
+        UPDATE training_task
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="projectId != null">project_id = #{projectId},</if>
+            <if test="modelVersionId != null">model_version_id = #{modelVersionId},</if>
+            <if test="datasetVersionId != null">dataset_version_id = #{datasetVersionId},</if>
+            <if test="image != null">image = #{image},</if>
+            <if test="command != null">command = #{command},</if>
+            <if test="resourceSpec != null">resource_spec = CAST(#{resourceSpec} AS JSONB),</if>
+            <if test="hyperparameters != null">hyperparameters = CAST(#{hyperparameters} AS JSONB),</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="priority != null">priority = #{priority},</if>
+            <if test="assignedNodeId != null">assigned_node_id = #{assignedNodeId},</if>
+            <if test="progress != null">progress = #{progress},</if>
+            <if test="errorMessage != null">error_message = #{errorMessage},</if>
+            <if test="startedAt != null">started_at = #{startedAt},</if>
+            <if test="completedAt != null">completed_at = #{completedAt},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE training_task
+        <set>
+            <if test="status != null">status = #{status},</if>
+            <if test="progress != null">progress = #{progress},</if>
+            <if test="errorMessage != null">error_message = #{errorMessage},</if>
+            <if test="assignedNodeId != null">assigned_node_id = #{assignedNodeId},</if>
+            <if test="startedAt != null">started_at = #{startedAt},</if>
+            <if test="completedAt != null">completed_at = #{completedAt},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+          AND status NOT IN ('completed', 'failed', 'cancelled')
+    </update>
+
+    <update id="updatePriority">
+        UPDATE training_task SET priority = #{priority}, updated_at = NOW() WHERE id = #{id}
+    </update>
+
+    <update id="resetForRequeue">
+        UPDATE training_task
+        SET status = 'queued',
+            progress = 0,
+            error_message = NULL,
+            assigned_node_id = NULL,
+            started_at = NULL,
+            completed_at = NULL,
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status NOT IN ('queued', 'running')
+    </update>
+
+    <select id="selectById" resultMap="taskMap">
+        SELECT <include refid="cols"/> FROM training_task WHERE id = #{id}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM training_task
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="projectId != null">AND project_id = #{projectId}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="keyword != null and keyword != ''">
+                AND name ILIKE '%' || #{keyword} || '%'
+            </if>
+        </where>
+    </select>
+
+    <select id="page" resultMap="taskMap">
+        SELECT <include refid="cols"/> FROM training_task
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="projectId != null">AND project_id = #{projectId}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="keyword != null and keyword != ''">
+                AND name ILIKE '%' || #{keyword} || '%'
+            </if>
+        </where>
+        ORDER BY created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+</mapper>

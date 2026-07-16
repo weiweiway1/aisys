@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.dataset.mapper.DatasetVersionMapper">
+
+    <resultMap id="versionMap" type="com.aisys.dataset.entity.DatasetVersion">
+        <id property="id" column="id"/>
+        <result property="datasetId" column="dataset_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="version" column="version"/>
+        <result property="storagePath" column="storage_path"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="checksum" column="checksum"/>
+        <result property="rowCount" column="row_count"/>
+        <result property="columnInfo" column="column_info"/>
+        <result property="status" column="status"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">id, dataset_id, tenant_id, version, storage_path, file_size, checksum,
+        row_count, column_info, status, created_by, created_at, updated_at</sql>
+
+    <select id="selectById" resultMap="versionMap">
+        SELECT <include refid="cols"/> FROM dataset_version WHERE id = #{id}
+    </select>
+
+    <select id="selectByDatasetAndVersion" resultMap="versionMap">
+        SELECT <include refid="cols"/> FROM dataset_version
+        WHERE dataset_id = #{datasetId} AND version = #{version}
+    </select>
+
+    <select id="listByDatasetId" resultMap="versionMap">
+        SELECT <include refid="cols"/> FROM dataset_version
+        WHERE dataset_id = #{datasetId}
+        ORDER BY created_at DESC
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.dataset.entity.DatasetVersion" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO dataset_version (tenant_id, dataset_id, version, storage_path, file_size, checksum,
+                                     row_count, column_info, status, created_by)
+        VALUES (#{tenantId}, #{datasetId}, #{version}, #{storagePath}, COALESCE(#{fileSize}, 0), #{checksum},
+                COALESCE(#{rowCount}, 0), #{columnInfo}::jsonb, COALESCE(#{status}, 'creating'), #{createdBy})
+    </insert>
+
+    <update id="updateStatus">
+        UPDATE dataset_version
+        <set>
+            <if test="status != null">status = #{status},</if>
+            <if test="fileSize != null">file_size = #{fileSize},</if>
+            <if test="checksum != null">checksum = #{checksum},</if>
+            <if test="rowCount != null">row_count = #{rowCount},</if>
+            <if test="columnInfo != null">column_info = #{columnInfo}::jsonb,</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM dataset_version WHERE id = #{id}
+    </delete>
+
+    <delete id="deleteByDatasetId">
+        DELETE FROM dataset_version WHERE dataset_id = #{datasetId}
+    </delete>
+</mapper>

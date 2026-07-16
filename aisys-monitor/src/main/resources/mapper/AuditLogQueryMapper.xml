@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.monitor.mapper.AuditLogQueryMapper">
+
+    <resultMap id="auditLogMap" type="com.aisys.monitor.entity.AuditLog">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="actorType" column="actor_type"/>
+        <result property="userId" column="user_id"/>
+        <result property="username" column="username"/>
+        <result property="action" column="action"/>
+        <result property="resource" column="resource"/>
+        <result property="resourceId" column="resource_id"/>
+        <result property="detail" column="detail"/>
+        <result property="ipAddress" column="ip_address"/>
+        <result property="userAgent" column="user_agent"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, actor_type, user_id, username, action, resource, resource_id,
+        detail::text AS detail, ip_address::text AS ip_address, user_agent, created_at
+    </sql>
+
+    <sql id="whereClause">
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="actorType != null and actorType != ''">AND actor_type = #{actorType}</if>
+            <if test="resource != null and resource != ''">AND resource = #{resource}</if>
+            <if test="action != null and action != ''">AND action = #{action}</if>
+            <if test="startTime != null">AND created_at &gt;= #{startTime}</if>
+            <if test="endTime != null">AND created_at &lt;= #{endTime}</if>
+        </where>
+    </sql>
+
+    <select id="selectPage" resultMap="auditLogMap">
+        SELECT <include refid="cols"/>
+        FROM audit_log
+        <include refid="whereClause"/>
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectCount" resultType="long">
+        SELECT COUNT(*) FROM audit_log
+        <include refid="whereClause"/>
+    </select>
+
+</mapper>

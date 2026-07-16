@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.resource.mapper.ResourceAllocationMapper">
+
+    <resultMap id="allocMap" type="com.aisys.resource.entity.ResourceAllocation">
+        <id     property="id"           column="id"/>
+        <result property="nodeId"       column="node_id"/>
+        <result property="taskType"     column="task_type"/>
+        <result property="taskId"       column="task_id"/>
+        <result property="tenantId"     column="tenant_id"/>
+        <result property="gpuCount"     column="gpu_count"/>
+        <result property="cpu"          column="cpu"/>
+        <result property="memoryBytes"  column="memory_bytes"/>
+        <result property="gpuDevices"   column="gpu_devices"/>
+        <result property="status"       column="status"/>
+        <result property="acquiredAt"   column="acquired_at"/>
+        <result property="releasedAt"   column="released_at"/>
+    </resultMap>
+
+    <resultMap id="aggMap" type="com.aisys.resource.mapper.NodeHeldAggregate">
+        <result property="nodeId"     column="node_id"/>
+        <result property="sumGpu"     column="sum_gpu"/>
+        <result property="sumCpu"     column="sum_cpu"/>
+        <result property="sumMemory"  column="sum_memory"/>
+        <result property="cnt"        column="cnt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.aisys.resource.entity.ResourceAllocation" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO resource_allocation
+            (node_id, task_type, task_id, tenant_id, gpu_count, cpu, memory_bytes, gpu_devices, status)
+        VALUES
+            (#{nodeId}, #{taskType}, #{taskId}, #{tenantId}, #{gpuCount}, #{cpu}, #{memoryBytes},
+             <choose><when test="gpuDevices != null">#{gpuDevices}::jsonb</when><otherwise>NULL</otherwise></choose>,
+             COALESCE(#{status}, 'held'))
+    </insert>
+
+    <select id="sumHeldByNode" resultMap="aggMap">
+        SELECT #{nodeId} AS node_id,
+               COALESCE(SUM(gpu_count), 0)    AS sum_gpu,
+               COALESCE(SUM(cpu), 0)          AS sum_cpu,
+               COALESCE(SUM(memory_bytes), 0) AS sum_memory,
+               COUNT(*)                       AS cnt
+        FROM resource_allocation
+        WHERE node_id = #{nodeId} AND status = 'held'
+    </select>
+
+    <select id="sumHeldByNodes" resultMap="aggMap">
+        SELECT node_id,
+               COALESCE(SUM(gpu_count), 0)    AS sum_gpu,
+               COALESCE(SUM(cpu), 0)          AS sum_cpu,
+               COALESCE(SUM(memory_bytes), 0) AS sum_memory,
+               COUNT(*)                       AS cnt
+        FROM resource_allocation
+        WHERE status = 'held'
+        <if test="nodeIds != null and nodeIds.size() > 0">
+            AND node_id IN
+            <foreach collection="nodeIds" item="nid" open="(" close=")" separator=",">#{nid}</foreach>
+        </if>
+        GROUP BY node_id
+    </select>
+
+    <select id="selectHeldByNode" resultMap="allocMap">
+        SELECT id, node_id, task_type, task_id, tenant_id, gpu_count, cpu, memory_bytes,
+               gpu_devices, status, acquired_at, released_at
+        FROM resource_allocation
+        WHERE node_id = #{nodeId} AND status = 'held'
+    </select>
+
+    <select id="selectHeldByTask" resultMap="allocMap">
+        SELECT id, node_id, task_type, task_id, tenant_id, gpu_count, cpu, memory_bytes,
+               gpu_devices, status, acquired_at, released_at
+        FROM resource_allocation
+        WHERE task_type = #{taskType} AND task_id = #{taskId} AND status = 'held'
+        LIMIT 1
+    </select>
+
+    <update id="releaseByTask">
+        UPDATE resource_allocation
+        SET status = 'released', released_at = NOW()
+        WHERE task_type = #{taskType} AND task_id = #{taskId} AND status = 'held'
+    </update>
+
+    <update id="releaseById">
+        UPDATE resource_allocation
+        SET status = 'released', released_at = NOW()
+        WHERE id = #{id} AND status = 'held'
+    </update>
+
+    <update id="releaseAllHeldByNode">
+        UPDATE resource_allocation
+        SET status = 'released', released_at = NOW()
+        WHERE node_id = #{nodeId} AND status = 'held'
+    </update>
+
+    <select id="countHeldByNode" resultType="int">
+        SELECT COUNT(*) FROM resource_allocation WHERE node_id = #{nodeId} AND status = 'held'
+    </select>
+</mapper>

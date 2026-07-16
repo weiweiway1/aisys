@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="aisys-training" />
+        <module name="aisys-notification" />
+        <module name="aisys-evaluation" />
+        <module name="aisys-monitor" />
+        <module name="aisys-resource" />
+        <module name="aisys-storage" />
+        <module name="aisys-common-redis" />
+        <module name="aisys-common-security" />
+        <module name="aisys-auth" />
+        <module name="aisys-common-core" />
+        <module name="aisys-common-feign" />
+        <module name="aisys-common-log" />
+        <module name="aisys-common-s3" />
+        <module name="aisys-common-mybatis" />
+        <module name="aisys-common-mq" />
+        <module name="aisys-model" />
+        <module name="aisys-dataset" />
+        <module name="aisys-gateway" />
+      </profile>
+    </annotationProcessing>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="aisys-auth" options="-parameters" />
+      <module name="aisys-common-core" options="-parameters" />
+      <module name="aisys-common-feign" options="-parameters" />
+      <module name="aisys-common-log" options="-parameters" />
+      <module name="aisys-common-mq" options="-parameters" />
+      <module name="aisys-common-mybatis" options="-parameters" />
+      <module name="aisys-common-redis" options="-parameters" />
+      <module name="aisys-common-s3" options="-parameters" />
+      <module name="aisys-common-security" options="-parameters" />
+      <module name="aisys-dataset" options="-parameters" />
+      <module name="aisys-evaluation" options="-parameters" />
+      <module name="aisys-gateway" options="-parameters" />
+      <module name="aisys-model" options="-parameters" />
+      <module name="aisys-monitor" options="-parameters" />
+      <module name="aisys-notification" options="-parameters" />
+      <module name="aisys-resource" options="-parameters" />
+      <module name="aisys-storage" options="-parameters" />
+      <module name="aisys-training" options="-parameters" />
+    </option>
+  </component>
+</project>

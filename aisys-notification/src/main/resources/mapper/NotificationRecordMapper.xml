@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.notification.mapper.NotificationRecordMapper">
+
+    <resultMap id="recordMap" type="com.aisys.notification.entity.NotificationRecord">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="type" column="type"/>
+        <result property="title" column="title"/>
+        <result property="content" column="content"/>
+        <result property="level" column="level"/>
+        <result property="isRead" column="is_read"/>
+        <result property="refType" column="ref_type"/>
+        <result property="refId" column="ref_id"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, user_id, type, title, content, level, is_read, ref_type, ref_id, created_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.notification.entity.NotificationRecord"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO notification_record
+            (tenant_id, user_id, type, title, content, level, is_read, ref_type, ref_id)
+        VALUES
+            (#{tenantId}, #{userId}, #{type}, #{title}, #{content},
+             COALESCE(#{level}, 'info'), COALESCE(#{isRead}, false),
+             #{refType}, #{refId})
+    </insert>
+
+    <select id="selectById" resultMap="recordMap">
+        SELECT <include refid="cols"/> FROM notification_record WHERE id = #{id}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM notification_record
+        <where>
+            <if test="userId != null">AND user_id = #{userId}</if>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="isRead != null">AND is_read = #{isRead}</if>
+            <if test="type != null and type != ''">AND type = #{type}</if>
+        </where>
+    </select>
+
+    <select id="page" resultMap="recordMap">
+        SELECT <include refid="cols"/> FROM notification_record
+        <where>
+            <if test="userId != null">AND user_id = #{userId}</if>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="isRead != null">AND is_read = #{isRead}</if>
+            <if test="type != null and type != ''">AND type = #{type}</if>
+        </where>
+        ORDER BY created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countUnread" resultType="long">
+        SELECT COUNT(*) FROM notification_record
+        WHERE user_id = #{userId} AND is_read = false
+    </select>
+
+    <update id="markRead">
+        UPDATE notification_record SET is_read = true
+        WHERE id = #{id} AND user_id = #{userId}
+    </update>
+
+    <update id="markAllRead">
+        UPDATE notification_record SET is_read = true
+        WHERE user_id = #{userId} AND is_read = false
+    </update>
+</mapper>

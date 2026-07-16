@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Encoding">
+    <file url="file://$PROJECT_DIR$/aisys-auth/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-core/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-feign/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-log/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-mq/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-mybatis/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-redis/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-s3/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/aisys-common-security/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-common/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-dataset/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-evaluation/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-gateway/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-model/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-monitor/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-notification/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-resource/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-storage/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/aisys-training/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />
+  </component>
+</project>

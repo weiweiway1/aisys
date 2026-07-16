@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'aisys-services'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - gateway:8080
+          - auth:8001
+          - model:8002
+          - dataset:8003
+          - training:8004
+          - evaluation:8005
+          - resource:8006
+          - storage:8007
+          - notification:8008
+          - monitor:8009
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service
+        regex: '([a-z]+):\d+'

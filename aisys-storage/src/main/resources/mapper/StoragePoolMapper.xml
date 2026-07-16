@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.storage.mapper.StoragePoolMapper">
+
+    <resultMap id="poolMap" type="com.aisys.storage.entity.StoragePool">
+        <id     property="id"          column="id"/>
+        <result property="name"        column="name"/>
+        <result property="type"        column="type"/>
+        <result property="endpoint"    column="endpoint"/>
+        <result property="bucket"      column="bucket"/>
+        <result property="accessKey"   column="access_key"/>
+        <result property="secretKey"   column="secret_key"/>
+        <result property="quotaBytes"  column="quota_bytes"/>
+        <result property="usedBytes"   column="used_bytes"/>
+        <result property="status"      column="status"/>
+        <result property="createdAt"   column="created_at"/>
+        <result property="updatedAt"   column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, name, type, endpoint, bucket, access_key, secret_key,
+        quota_bytes, used_bytes, status, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="poolMap">
+        SELECT <include refid="cols"/> FROM storage_pool WHERE id = #{id}
+    </select>
+
+    <select id="selectByName" resultMap="poolMap">
+        SELECT <include refid="cols"/> FROM storage_pool WHERE name = #{name}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM storage_pool
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND name ILIKE '%' || #{keyword} || '%'
+            </if>
+        </where>
+    </select>
+
+    <select id="page" resultMap="poolMap">
+        SELECT <include refid="cols"/> FROM storage_pool
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND name ILIKE '%' || #{keyword} || '%'
+            </if>
+        </where>
+        ORDER BY created_at DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.storage.entity.StoragePool"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO storage_pool (name, type, endpoint, bucket, access_key, secret_key,
+                                  quota_bytes, used_bytes, status)
+        VALUES (#{name}, COALESCE(#{type}, 'seaweedfs'), #{endpoint}, #{bucket},
+                #{accessKey}, #{secretKey}, #{quotaBytes},
+                COALESCE(#{usedBytes}, 0), COALESCE(#{status}, 'active'))
+    </insert>
+
+    <update id="update" parameterType="com.aisys.storage.entity.StoragePool">
+        UPDATE storage_pool
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="type != null">type = #{type},</if>
+            <if test="endpoint != null">endpoint = #{endpoint},</if>
+            <if test="bucket != null">bucket = #{bucket},</if>
+            <if test="accessKey != null">access_key = #{accessKey},</if>
+            <if test="secretKey != null">secret_key = #{secretKey},</if>
+            <if test="quotaBytes != null">quota_bytes = #{quotaBytes},</if>
+            <if test="status != null">status = #{status},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+        <!-- 注意：used_bytes 不在此处更新，必须只通过原子语句 addUsedBytes(used_bytes + delta) 变更，
+             否则与并发的上传/删除累加发生读-改-写丢失。 -->
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM storage_pool WHERE id = #{id}
+    </delete>
+
+    <update id="addUsedBytes">
+        UPDATE storage_pool
+        SET used_bytes = GREATEST(used_bytes + #{delta}, 0),
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+</mapper>

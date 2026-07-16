@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.model.mapper.ModelTagMapper">
+
+    <resultMap id="tagMap" type="com.aisys.model.entity.ModelTag">
+        <id     property="id"        column="id"/>
+        <result property="tenantId"  column="tenant_id"/>
+        <result property="parentId"  column="parent_id"/>
+        <result property="name"      column="name"/>
+        <result property="path"      column="path"/>
+        <result property="sort"      column="sort"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">id, tenant_id, parent_id, name, path, sort, created_at</sql>
+
+    <select id="selectById" resultMap="tagMap">
+        SELECT <include refid="cols"/> FROM model_tag WHERE id = #{id}
+    </select>
+
+    <select id="selectAll" resultMap="tagMap">
+        SELECT <include refid="cols"/> FROM model_tag ORDER BY sort ASC, id ASC
+    </select>
+
+    <select id="selectByParentId" resultMap="tagMap">
+        SELECT <include refid="cols"/> FROM model_tag
+        WHERE <choose>
+                  <when test="parentId != null">parent_id = #{parentId}</when>
+                  <otherwise>parent_id IS NULL</otherwise>
+              </choose>
+        ORDER BY sort ASC, id ASC
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.model.entity.ModelTag"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO model_tag (tenant_id, parent_id, name, path, sort)
+        VALUES (#{tenantId}, #{parentId}, #{name}, #{path}, COALESCE(#{sort}, 0))
+    </insert>
+
+    <update id="update" parameterType="com.aisys.model.entity.ModelTag">
+        UPDATE model_tag
+        <set>
+            <if test="parentId != null">parent_id = #{parentId},</if>
+            <if test="name != null">name = #{name},</if>
+            <if test="path != null">path = #{path},</if>
+            <if test="sort != null">sort = #{sort},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM model_tag WHERE id = #{id}
+    </delete>
+</mapper>

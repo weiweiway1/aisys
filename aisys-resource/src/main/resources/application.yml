@@ -1,0 +1,84 @@
+server:
+  port: 8006
+  shutdown: graceful
+
+spring:
+  application:
+    name: aisys-resource
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:default}
+
+  # 双连接池：app 受 RLS 约束；admin 带 BYPASSRLS（调度器/平台共享表走 admin 全局可见）
+  datasource:
+    app:
+      url: jdbc:postgresql://${PG_HOST:postgresql}:${PG_PORT:5432}/${PG_DB:aisys}
+      username: ${PG_APP_USER:aisys_app}
+      password: ${PG_APP_PASSWORD:aisys_app_pwd}
+      maximum-pool-size: ${DB_POOL:8}
+      connection-timeout: 20000
+    admin:
+      url: jdbc:postgresql://${PG_HOST:postgresql}:${PG_PORT:5432}/${PG_DB:aisys}
+      username: ${PG_ADMIN_USER:aisys_platform_admin}
+      password: ${PG_ADMIN_PASSWORD:aisys_admin_pwd}
+      maximum-pool-size: 3
+      connection-timeout: 20000
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  rabbitmq:
+    host: ${RABBIT_HOST:rabbitmq}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:guest}
+    password: ${RABBIT_PASSWORD:guest}
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        register-enabled: ${NACOS_REGISTER:true}
+
+mybatis:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+aisys:
+  jwt:
+    issuer: aisys-auth
+    public-key: ${AISYS_JWT_PUBLIC_KEY:}
+  outbox:
+    enabled: true            # 生产 task.status/task.log/task.metrics/notification.event
+    poll-interval-ms: 3000
+  resource:
+    heartbeat-timeout-seconds: 90   # 超过该秒数无心跳判为离线
+    node-status-ttl-seconds: 30     # Redis node:status:{id} TTL
+    schedule-lease-seconds: 60      # lock:node:{nodeId} 租约时长
+  s3:                               # 预签名模型镜像 tar / 数据集对象给 Agent 下载（同一 S3 存储池）
+    endpoint: ${S3_ENDPOINT:http://seaweedfs:8333}
+    region: ${S3_REGION:us-east-1}
+    access-key: ${S3_ACCESS_KEY:aisys}
+    secret-key: ${S3_SECRET_KEY:aisyssecret}
+    bucket: ${S3_BUCKET:aisys}
+    path-style-access: true
+    presign-minutes: ${S3_PRESIGN_MINUTES:360}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
+  level:
+    com.aisys: INFO
+    org.springframework: WARN

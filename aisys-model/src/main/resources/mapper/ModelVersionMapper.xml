@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.model.mapper.ModelVersionMapper">
+
+    <resultMap id="versionMap" type="com.aisys.model.entity.ModelVersion">
+        <id     property="id"          column="id"/>
+        <result property="modelId"     column="model_id"/>
+        <result property="tenantId"    column="tenant_id"/>
+        <result property="version"     column="version"/>
+        <result property="storagePath" column="storage_path"/>
+        <result property="fileSize"    column="file_size"/>
+        <result property="checksum"    column="checksum"/>
+        <result property="status"      column="status"/>
+        <result property="config"      column="config"/>
+        <result property="createdBy"   column="created_by"/>
+        <result property="createdAt"   column="created_at"/>
+        <result property="updatedAt"   column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, model_id, tenant_id, version, storage_path, file_size, checksum, status,
+        config::text AS config, created_by, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="versionMap">
+        SELECT <include refid="cols"/> FROM model_version WHERE id = #{id}
+    </select>
+
+    <select id="selectByModelAndVersion" resultMap="versionMap">
+        SELECT <include refid="cols"/> FROM model_version
+        WHERE model_id = #{modelId} AND version = #{version}
+        LIMIT 1
+    </select>
+
+    <select id="selectReadyByChecksum" resultMap="versionMap">
+        SELECT <include refid="cols"/> FROM model_version
+        WHERE checksum = #{checksum} AND status = 'ready' AND model_id = #{modelId}
+        LIMIT 1
+    </select>
+
+    <select id="selectByModelId" resultMap="versionMap">
+        SELECT <include refid="cols"/> FROM model_version
+        WHERE model_id = #{modelId}
+        ORDER BY created_at DESC
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.model.entity.ModelVersion"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO model_version (model_id, tenant_id, version, storage_path, file_size,
+                                   checksum, status, config, created_by)
+        VALUES (#{modelId}, #{tenantId}, #{version}, #{storagePath}, #{fileSize},
+                #{checksum}, COALESCE(#{status}, 'creating'),
+                <choose>
+                    <when test="config != null">CAST(#{config} AS JSONB)</when>
+                    <otherwise>NULL</otherwise>
+                </choose>,
+                #{createdBy})
+    </insert>
+
+    <update id="update" parameterType="com.aisys.model.entity.ModelVersion">
+        UPDATE model_version
+        <set>
+            <if test="version != null">version = #{version},</if>
+            <if test="storagePath != null">storage_path = #{storagePath},</if>
+            <if test="fileSize != null">file_size = #{fileSize},</if>
+            <if test="checksum != null">checksum = #{checksum},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="config != null">config = CAST(#{config} AS JSONB),</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateUploadResult">
+        UPDATE model_version
+        SET storage_path = #{storagePath}, file_size = #{fileSize}, checksum = #{checksum},
+            status = #{status}, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE model_version SET status = #{status}, updated_at = NOW() WHERE id = #{id}
+    </update>
+
+    <delete id="deleteByModelId">
+        DELETE FROM model_version WHERE model_id = #{modelId}
+    </delete>
+
+    <delete id="deleteById">
+        DELETE FROM model_version WHERE id = #{id}
+    </delete>
+</mapper>

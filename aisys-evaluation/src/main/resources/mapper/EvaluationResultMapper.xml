@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.evaluation.mapper.EvaluationResultMapper">
+
+    <resultMap id="ResultMap" type="com.aisys.evaluation.entity.EvaluationResult">
+        <id     property="id"               column="id"/>
+        <result property="evaluationTaskId" column="evaluation_task_id"/>
+        <result property="tenantId"         column="tenant_id"/>
+        <result property="modelVersionId"   column="model_version_id"/>
+        <result property="benchmarkId"      column="benchmark_id"/>
+        <result property="overallScores"    column="overall_scores"/>
+        <result property="categoryScores"   column="category_scores"/>
+        <result property="sampleCount"      column="sample_count"/>
+        <result property="detailPath"       column="detail_path"/>
+        <result property="completedAt"      column="completed_at"/>
+        <result property="createdAt"        column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, evaluation_task_id, tenant_id, model_version_id, benchmark_id,
+        overall_scores::text  AS overall_scores,
+        category_scores::text AS category_scores,
+        sample_count, detail_path, completed_at, created_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.evaluation.entity.EvaluationResult"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO evaluation_result (evaluation_task_id, tenant_id, model_version_id, benchmark_id,
+                                       overall_scores, category_scores, sample_count, detail_path, completed_at)
+        VALUES (#{evaluationTaskId}, #{tenantId}, #{modelVersionId}, #{benchmarkId},
+                CAST(#{overallScores} AS JSONB),
+                CAST(#{categoryScores} AS JSONB),
+                #{sampleCount}, #{detailPath}, COALESCE(#{completedAt}, NOW()))
+    </insert>
+
+    <select id="selectByIdAndTenant" resultMap="ResultMap">
+        SELECT <include refid="cols"/> FROM evaluation_result
+        WHERE id = #{id} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectByTaskId" resultMap="ResultMap">
+        SELECT <include refid="cols"/> FROM evaluation_result
+        WHERE evaluation_task_id = #{taskId} AND tenant_id = #{tenantId}
+        ORDER BY model_version_id ASC
+    </select>
+
+    <select id="selectByBenchmark" resultMap="ResultMap">
+        SELECT <include refid="cols"/> FROM evaluation_result
+        WHERE benchmark_id = #{benchmarkId} AND tenant_id = #{tenantId}
+        ORDER BY completed_at DESC
+    </select>
+
+    <select id="selectByIds" resultMap="ResultMap">
+        SELECT <include refid="cols"/> FROM evaluation_result
+        WHERE tenant_id = #{tenantId}
+        AND id IN
+        <foreach collection="ids" item="rid" open="(" separator="," close=")">
+            #{rid}
+        </foreach>
+    </select>
+
+    <delete id="deleteByTaskId">
+        DELETE FROM evaluation_result WHERE evaluation_task_id = #{taskId} AND tenant_id = #{tenantId}
+    </delete>
+</mapper>

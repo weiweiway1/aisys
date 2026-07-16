@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.notification.mapper.NotificationRuleMapper">
+
+    <resultMap id="ruleMap" type="com.aisys.notification.entity.NotificationRule">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="targetType" column="target_type"/>
+        <!-- JSONB 列以字符串透传，由 Service 用 Jackson 序列化/反序列化 -->
+        <result property="targetIds" column="target_ids"/>
+        <result property="channels" column="channels"/>
+        <result property="webhookUrl" column="webhook_url"/>
+        <result property="enabled" column="enabled"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, event_type, target_type, target_ids, channels, webhook_url, enabled, created_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.notification.entity.NotificationRule"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO notification_rule
+            (tenant_id, event_type, target_type, target_ids, channels, webhook_url, enabled)
+        VALUES
+            (#{tenantId}, #{eventType}, #{targetType},
+             #{targetIds}::jsonb, #{channels}::jsonb,
+             #{webhookUrl}, COALESCE(#{enabled}, true))
+    </insert>
+
+    <select id="selectById" resultMap="ruleMap">
+        SELECT <include refid="cols"/> FROM notification_rule WHERE id = #{id}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM notification_rule
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="eventType != null and eventType != ''">AND event_type = #{eventType}</if>
+        </where>
+    </select>
+
+    <select id="page" resultMap="ruleMap">
+        SELECT <include refid="cols"/> FROM notification_rule
+        <where>
+            <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+            <if test="eventType != null and eventType != ''">AND event_type = #{eventType}</if>
+        </where>
+        ORDER BY created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectEnabledByEventType" resultMap="ruleMap">
+        SELECT <include refid="cols"/> FROM notification_rule
+        WHERE event_type = #{eventType} AND enabled = true
+          AND (tenant_id IS NULL OR tenant_id = #{tenantId})
+    </select>
+
+    <update id="update" parameterType="com.aisys.notification.entity.NotificationRule">
+        UPDATE notification_rule
+        <set>
+            <if test="eventType != null">event_type = #{eventType},</if>
+            <if test="targetType != null">target_type = #{targetType},</if>
+            <if test="targetIds != null">target_ids = #{targetIds}::jsonb,</if>
+            <if test="channels != null">channels = #{channels}::jsonb,</if>
+            <if test="webhookUrl != null">webhook_url = #{webhookUrl},</if>
+            <if test="enabled != null">enabled = #{enabled}</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM notification_rule WHERE id = #{id}
+        <if test="tenantId != null">AND tenant_id = #{tenantId}</if>
+    </delete>
+
+    <select id="countByEventType" resultType="long">
+        SELECT COUNT(*) FROM notification_rule WHERE event_type = #{eventType}
+    </select>
+</mapper>

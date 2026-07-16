@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.evaluation.mapper.BenchmarkMapper">
+
+    <resultMap id="BenchmarkMap" type="com.aisys.evaluation.entity.Benchmark">
+        <id     property="id"          column="id"/>
+        <result property="tenantId"    column="tenant_id"/>
+        <result property="name"        column="name"/>
+        <result property="category"    column="category"/>
+        <result property="description" column="description"/>
+        <result property="datasetVersionIds" column="dataset_version_ids"/>
+        <result property="metricsConfig"     column="metrics_config"/>
+        <result property="evalConfig"        column="eval_config"/>
+        <result property="promptTemplate"    column="prompt_template"/>
+        <result property="status"      column="status"/>
+        <result property="createdAt"   column="created_at"/>
+        <result property="updatedAt"   column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, name, category, description,
+        dataset_version_ids::text AS dataset_version_ids,
+        metrics_config::text      AS metrics_config,
+        eval_config::text         AS eval_config,
+        prompt_template, status, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.evaluation.entity.Benchmark"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO benchmark (tenant_id, name, category, description, dataset_version_ids,
+                               metrics_config, eval_config, prompt_template, status)
+        VALUES (#{tenantId}, #{name}, #{category}, #{description},
+                CAST(#{datasetVersionIds} AS JSONB),
+                CAST(#{metricsConfig} AS JSONB),
+                CAST(#{evalConfig} AS JSONB),
+                #{promptTemplate},
+                COALESCE(#{status}, 'active'))
+    </insert>
+
+    <update id="update" parameterType="com.aisys.evaluation.entity.Benchmark">
+        UPDATE benchmark
+        SET name            = #{name},
+            category        = #{category},
+            description     = #{description},
+            dataset_version_ids = CAST(#{datasetVersionIds} AS JSONB),
+            metrics_config  = CAST(#{metricsConfig} AS JSONB),
+            eval_config     = CAST(#{evalConfig} AS JSONB),
+            prompt_template = #{promptTemplate},
+            status          = #{status}
+        WHERE id = #{id} AND tenant_id = #{tenantId}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE benchmark SET status = #{status} WHERE id = #{id} AND tenant_id = #{tenantId}
+    </update>
+
+    <select id="selectByIdAndTenant" resultMap="BenchmarkMap">
+        SELECT <include refid="cols"/> FROM benchmark
+        WHERE id = #{id} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectPage" resultMap="BenchmarkMap">
+        SELECT <include refid="cols"/> FROM benchmark
+        WHERE tenant_id = #{tenantId}
+        <if test="keyword != null and keyword != ''">
+            AND name ILIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        <if test="category != null and category != ''">
+            AND category = #{category}
+        </if>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        ORDER BY created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM benchmark
+        WHERE tenant_id = #{tenantId}
+        <if test="keyword != null and keyword != ''">
+            AND name ILIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        <if test="category != null and category != ''">
+            AND category = #{category}
+        </if>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <delete id="deleteByIdAndTenant">
+        DELETE FROM benchmark WHERE id = #{id} AND tenant_id = #{tenantId}
+    </delete>
+</mapper>

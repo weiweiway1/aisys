@@ -1,0 +1,93 @@
+server:
+  port: 8007
+  shutdown: graceful
+
+spring:
+  application:
+    name: aisys-storage
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:default}
+
+  # 文件代理上传：放宽 multipart 限制（默认 1MB 会拒绝大文件并抛 500）
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE:2GB}
+      max-request-size: ${MULTIPART_MAX_REQUEST:2GB}
+
+  # 双连接池：app 受 RLS 约束；admin 带 BYPASSRLS（DDD 4.1.3）
+  # storage_pool 为平台共享表（不启用 RLS），租户路径隔离由 Service 层显式拼前缀实现
+  datasource:
+    app:
+      url: jdbc:postgresql://${PG_HOST:postgresql}:${PG_PORT:5432}/${PG_DB:aisys}
+      username: ${PG_APP_USER:aisys_app}
+      password: ${PG_APP_PASSWORD:aisys_app_pwd}
+      maximum-pool-size: ${DB_POOL:8}
+      connection-timeout: 20000
+    admin:
+      url: jdbc:postgresql://${PG_HOST:postgresql}:${PG_PORT:5432}/${PG_DB:aisys}
+      username: ${PG_ADMIN_USER:aisys_platform_admin}
+      password: ${PG_ADMIN_PASSWORD:aisys_admin_pwd}
+      maximum-pool-size: 3
+      connection-timeout: 20000
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  rabbitmq:
+    host: ${RABBIT_HOST:rabbitmq}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:guest}
+    password: ${RABBIT_PASSWORD:guest}
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        register-enabled: ${NACOS_REGISTER:true}
+
+mybatis:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+aisys:
+  jwt:
+    issuer: aisys-auth
+    public-key: ${AISYS_JWT_PUBLIC_KEY:}
+  s3:
+    endpoint: ${S3_ENDPOINT:http://seaweedfs:8333}
+    region: ${S3_REGION:us-east-1}
+    access-key: ${S3_ACCESS_KEY:aisys}
+    secret-key: ${S3_SECRET_KEY:aisyssecret}
+    bucket: ${S3_BUCKET:aisys}
+    path-style-access: true
+    presign-minutes: ${S3_PRESIGN_MINUTES:60}
+  outbox:
+    enabled: true
+    poll-interval-ms: 3000
+  flyway:
+    enabled: true
+  storage:
+    # 默认存储池配置（启动时由 DefaultPoolInitializer 确保存在）
+    default-pool-name: default
+    default-pool-quota-bytes: ${STORAGE_DEFAULT_QUOTA:1099511627776}   # 1 TiB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
+  level:
+    com.aisys: INFO
+    org.springframework: WARN

@@ -1,0 +1,250 @@
+# AI模型测评平台 — 一键部署（开发环境，DDD 10.1）
+# 所有构建/调试经容器完成；后端服务以容器内编译的 jar 运行（多阶段 Dockerfile）。
+# restart=unless-stopped：解决启动期 Nacos/PG 就绪竞态（先 crash 的服务自动重启直至依赖就绪）。
+name: aisys
+
+x-backend-env: &backend-env
+  PG_HOST: postgresql
+  PG_PORT: "5432"
+  PG_DB: aisys
+  PG_APP_USER: aisys_app
+  PG_APP_PASSWORD: aisys_app_pwd
+  PG_ADMIN_USER: aisys_platform_admin
+  PG_ADMIN_PASSWORD: aisys_admin_pwd
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  RABBIT_HOST: rabbitmq
+  RABBIT_USER: guest
+  RABBIT_PASSWORD: guest
+  NACOS_ADDR: nacos:8848
+  NACOS_REGISTER: "true"
+  S3_ENDPOINT: http://seaweedfs:8333
+  S3_ACCESS_KEY: aisys
+  S3_SECRET_KEY: aisyssecret
+  S3_BUCKET: aisys
+
+x-deps-pg-redis-nacos: &deps-prn
+  postgresql: { condition: service_healthy }
+  redis: { condition: service_healthy }
+  nacos: { condition: service_healthy }
+
+services:
+  # ---------- 基础设施 ----------
+  postgresql:
+    image: postgres:18.4
+    restart: unless-stopped
+    # 10 个后端服务各自持有 Hikari 连接池（app 8 + admin 3 ≈ 11/服务），合计 >100；
+    # 提高最大连接数避免连接耗尽（"remaining connection slots are reserved for SUPERUSER"）。
+    command: ["postgres", "-c", "max_connections=250"]
+    environment:
+      POSTGRES_DB: aisys
+      POSTGRES_USER: aisys
+      POSTGRES_PASSWORD: aisys
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aisys"]
+      interval: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    restart: unless-stopped
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      retries: 30
+
+  nacos:
+    image: nacos/nacos-server:v3.2.2
+    restart: unless-stopped
+    environment:
+      MODE: standalone
+      JVM_XMS: 384m
+      JVM_XMX: 640m
+      JVM_XMN: 128m
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: YWlzeXMtbmFjb3MtZGV2LXNlY3JldC1rZXktMTIzNDU2Nzg5MC1iYXNlNjQtc3RyaW5nLWxvbmctZW5vdWdo
+      NACOS_AUTH_IDENTITY_KEY: serverIdentity
+      NACOS_AUTH_IDENTITY_VALUE: security
+    ports: ["8848:8848"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8848/nacos/ || exit 1"]
+      interval: 8s
+      timeout: 5s
+      retries: 40
+      start_period: 40s
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.34
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json"]
+    ports: ["8333:8333", "8888:8888", "9333:9333"]
+    volumes:
+      - weeddata:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9333/cluster/status || exit 1"]
+      interval: 10s
+      retries: 30
+
+  prometheus:
+    image: prom/prometheus:v3.11.3
+    restart: unless-stopped
+    volumes: ["./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+    depends_on: [gateway]
+
+  grafana:
+    image: grafana/grafana:13.0.2
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+
+  # ---------- 微服务 ----------
+  gateway:
+    build: { context: .., dockerfile: docker/gateway/Dockerfile }
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      AUTH_HOST: auth
+      MODEL_HOST: model
+      DATASET_HOST: dataset
+      TRAINING_HOST: training
+      EVALUATION_HOST: evaluation
+      RESOURCE_HOST: resource
+      STORAGE_HOST: storage
+      NOTIFICATION_HOST: notification
+      MONITOR_HOST: monitor
+    env_file: [./secrets/jwt.env]
+    ports: ["8080:8080"]
+    depends_on: *deps-prn
+
+  auth:
+    build: { context: .., dockerfile: docker/auth/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "256m" }
+    env_file: [./secrets/jwt.env]
+    depends_on: *deps-prn
+
+  model:
+    build: { context: .., dockerfile: docker/model/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "256m" }
+    env_file: [./secrets/jwt.env]
+    depends_on:
+      <<: *deps-prn
+      seaweedfs: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+  dataset:
+    build: { context: .., dockerfile: docker/dataset/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "256m" }
+    env_file: [./secrets/jwt.env]
+    depends_on:
+      <<: *deps-prn
+      seaweedfs: { condition: service_healthy }
+  storage:
+    build: { context: .., dockerfile: docker/storage/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "256m" }
+    env_file: [./secrets/jwt.env]
+    depends_on:
+      <<: *deps-prn
+      seaweedfs: { condition: service_healthy }
+  training:
+    build: { context: .., dockerfile: docker/training/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "288m" }
+    env_file: [./secrets/jwt.env]
+    depends_on:
+      <<: *deps-prn
+      rabbitmq: { condition: service_healthy }
+      seaweedfs: { condition: service_healthy }
+  evaluation:
+    build: { context: .., dockerfile: docker/evaluation/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "288m" }
+    env_file: [./secrets/jwt.env]
+    depends_on:
+      <<: *deps-prn
+      rabbitmq: { condition: service_healthy }
+      seaweedfs: { condition: service_healthy }
+  resource:
+    build: { context: .., dockerfile: docker/resource/Dockerfile }
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      JAVA_XMX: "288m"
+      AISYS_RESOURCE_ENROLL_TOKEN: dev-enroll-token   # Agent 注册 enrollment token（与 agent ENROLL_TOKEN 一致）
+    env_file: [./secrets/jwt.env]
+    depends_on:
+      <<: *deps-prn
+      rabbitmq: { condition: service_healthy }
+  notification:
+    build: { context: .., dockerfile: docker/notification/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "256m" }
+    env_file: [./secrets/jwt.env]
+    depends_on:
+      <<: *deps-prn
+      rabbitmq: { condition: service_healthy }
+  monitor:
+    build: { context: .., dockerfile: docker/monitor/Dockerfile }
+    restart: unless-stopped
+    environment: { <<: *backend-env, JAVA_XMX: "256m" }
+    env_file: [./secrets/jwt.env]
+    depends_on: *deps-prn
+
+  # ---------- Agent（CPU 模拟执行，挂载 docker.sock 拉起容器）----------
+  agent:
+    build: { context: .., dockerfile: docker/agent/Dockerfile }
+    restart: unless-stopped
+    environment:
+      PLATFORM_ADDR: resource:8006
+      NODE_NAME: sim-node-01
+      NODE_IP: ""
+      AGENT_ID: agent-sim-01
+      ENROLL_TOKEN: dev-enroll-token
+      AGENT_TOKEN: ""
+      DOCKER_HOST_SOCKET: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 任务工作目录与宿主共享：agent 经宿主 docker.sock 拉起模型容器时，-v 绑定路径在宿主侧可解析，
+      # 否则容器内的挂载点为空（数据集/输出都看不到）。路径须与 AISYS_WORK_DIR 默认值一致。
+      - /tmp/aisys-agent:/tmp/aisys-agent
+    depends_on: [resource]
+
+  # ---------- 前端 ----------
+  web:
+    build: { context: .., dockerfile: docker/web/Dockerfile }
+    restart: unless-stopped
+    ports: ["8081:80"]
+    depends_on: [gateway]
+
+  # 临时远程开发入口：通过 Cloudflare Quick Tunnel 暴露 web:80
+  web-tunnel:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--protocol", "http2", "--url", "http://web:80", "--no-autoupdate", "--loglevel", "info"]
+    depends_on: [web]
+
+volumes:
+  pgdata:
+  weeddata:

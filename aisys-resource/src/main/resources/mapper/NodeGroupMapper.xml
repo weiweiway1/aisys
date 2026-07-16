@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.resource.mapper.NodeGroupMapper">
+
+    <select id="selectAll" resultType="com.aisys.resource.entity.NodeGroup">
+        SELECT id, name, description, created_at
+        FROM node_group
+        ORDER BY id
+    </select>
+
+    <select id="selectById" resultType="com.aisys.resource.entity.NodeGroup">
+        SELECT id, name, description, created_at
+        FROM node_group
+        WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.resource.entity.NodeGroup" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO node_group (name, description) VALUES (#{name}, #{description})
+    </insert>
+
+    <update id="update" parameterType="com.aisys.resource.entity.NodeGroup">
+        UPDATE node_group
+        SET name = #{name},
+            description = #{description}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM node_group WHERE id = #{id}
+    </delete>
+
+    <select id="countNodesInGroup" resultType="int">
+        SELECT COUNT(*) FROM compute_node WHERE node_group_id = #{groupId}
+    </select>
+</mapper>

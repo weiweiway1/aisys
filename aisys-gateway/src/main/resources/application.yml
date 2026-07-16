@@ -1,0 +1,50 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: aisys-gateway
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:default}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        register-enabled: ${NACOS_REGISTER:true}
+    gateway:
+      discovery:
+        locator:
+          enabled: false   # 使用 RouteConfig.java 的显式 Java DSL 路由
+      # WebSocket 卯开（默认支持升级）
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+            allowCredentials: true
+            maxAge: 3600
+
+aisys:
+  jwt:
+    issuer: aisys-auth
+    public-key: ${AISYS_JWT_PUBLIC_KEY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
+  level:
+    com.aisys: INFO
+    org.springframework.cloud.gateway: INFO

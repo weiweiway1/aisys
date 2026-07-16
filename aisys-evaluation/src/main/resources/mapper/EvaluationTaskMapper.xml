@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.evaluation.mapper.EvaluationTaskMapper">
+
+    <resultMap id="TaskMap" type="com.aisys.evaluation.entity.EvaluationTask">
+        <id     property="id"        column="id"/>
+        <result property="tenantId"  column="tenant_id"/>
+        <result property="projectId" column="project_id"/>
+        <result property="benchmarkId" column="benchmark_id"/>
+        <result property="name"      column="name"/>
+        <result property="modelVersionIds" column="model_version_ids"/>
+        <result property="status"    column="status"/>
+        <result property="progress"  column="progress"/>
+        <result property="config"    column="config"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="completedAt" column="completed_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, tenant_id, project_id, benchmark_id, name,
+        model_version_ids::text AS model_version_ids,
+        status, progress, config::text AS config,
+        started_at, completed_at, created_by, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.evaluation.entity.EvaluationTask"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO evaluation_task (tenant_id, project_id, benchmark_id, name, model_version_ids,
+                                     status, progress, config, created_by)
+        VALUES (#{tenantId}, #{projectId}, #{benchmarkId}, #{name},
+                CAST(#{modelVersionIds} AS JSONB),
+                COALESCE(#{status}, 'pending'),
+                COALESCE(#{progress}, 0),
+                CAST(#{config} AS JSONB),
+                #{createdBy})
+    </insert>
+
+    <select id="selectByIdAndTenant" resultMap="TaskMap">
+        SELECT <include refid="cols"/> FROM evaluation_task
+        WHERE id = #{id} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectPage" resultMap="TaskMap">
+        SELECT <include refid="cols"/> FROM evaluation_task
+        WHERE tenant_id = #{tenantId}
+        <if test="projectId != null">
+            AND project_id = #{projectId}
+        </if>
+        <if test="benchmarkId != null">
+            AND benchmark_id = #{benchmarkId}
+        </if>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        ORDER BY created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM evaluation_task
+        WHERE tenant_id = #{tenantId}
+        <if test="projectId != null">
+            AND project_id = #{projectId}
+        </if>
+        <if test="benchmarkId != null">
+            AND benchmark_id = #{benchmarkId}
+        </if>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <update id="updateStatus">
+        UPDATE evaluation_task
+        SET status = #{status},
+            progress = #{progress},
+            <if test="startedAt != null">started_at = #{startedAt},</if>
+            <if test="completedAt != null">completed_at = #{completedAt},</if>
+            updated_at = NOW()
+        WHERE id = #{id} AND tenant_id = #{tenantId}
+    </update>
+
+    <delete id="deleteByIdAndTenant">
+        DELETE FROM evaluation_task WHERE id = #{id} AND tenant_id = #{tenantId}
+    </delete>
+</mapper>

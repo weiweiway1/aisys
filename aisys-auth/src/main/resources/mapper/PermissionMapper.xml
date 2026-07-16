@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.auth.mapper.PermissionMapper">
+
+    <resultMap id="permMap" type="com.aisys.auth.entity.Permission">
+        <id property="id" column="id"/>
+        <result property="code" column="code"/>
+        <result property="name" column="name"/>
+        <result property="resource" column="resource"/>
+        <result property="description" column="description"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <select id="selectAll" resultMap="permMap">
+        SELECT id, code, name, resource, description, created_at FROM permission ORDER BY resource, code
+    </select>
+
+    <select id="selectByCode" resultMap="permMap">
+        SELECT id, code, name, resource, description, created_at FROM permission WHERE code = #{code}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.auth.entity.Permission" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO permission (code, name, resource, description) VALUES (#{code}, #{name}, #{resource}, #{description})
+        ON CONFLICT (code) DO NOTHING
+    </insert>
+</mapper>

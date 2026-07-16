@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.aisys</groupId>
+        <artifactId>aisys-platform</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>aisys-resource</artifactId>
+    <name>aisys-resource (计算资源+Agent接入服务)</name>
+
+    <dependencies>
+        <!-- 公共模块 -->
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-core</artifactId></dependency>
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-security</artifactId></dependency>
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-mybatis</artifactId></dependency>
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-redis</artifactId></dependency>
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-log</artifactId></dependency>
+        <!-- 生产 task.status/task.log/task.metrics；消费 task.command -->
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-mq</artifactId></dependency>
+        <!-- 调 storage 服务（拉取镜像/产出路径解析） -->
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-feign</artifactId></dependency>
+        <!-- 直接预签名模型镜像 tar / 数据集对象给 Agent 下载（同一 S3 存储池） -->
+        <dependency><groupId>com.aisys</groupId><artifactId>aisys-common-s3</artifactId></dependency>
+
+        <!-- Web / Actuator / Security / Validation -->
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
+        <!-- WebSocket（Agent 长连接） -->
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-websocket</artifactId></dependency>
+
+        <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-registry-prometheus</artifactId></dependency>
+
+        <!-- Flyway（显式引入，否则 FlywayAutoConfiguration 被 @ConditionalOnClass 跳过） -->
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-database-postgresql</artifactId></dependency>
+
+        <!-- Nacos 服务发现 -->
+        <dependency><groupId>com.alibaba.cloud</groupId><artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId></dependency>
+
+        <!-- OpenFeign（common-feign 拦截器依赖 feign.RequestInterceptor） -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+        <dependency><groupId>org.springframework.cloud</groupId><artifactId>spring-cloud-starter-loadbalancer</artifactId></dependency>
+
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+    </dependencies>
+
+    <build>
+        <finalName>aisys-resource</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

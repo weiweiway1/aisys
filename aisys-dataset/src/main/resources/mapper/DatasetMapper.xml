@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.dataset.mapper.DatasetMapper">
+
+    <resultMap id="datasetMap" type="com.aisys.dataset.entity.Dataset">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="projectId" column="project_id"/>
+        <result property="name" column="name"/>
+        <result property="type" column="type"/>
+        <result property="format" column="format"/>
+        <result property="taskType" column="task_type"/>
+        <result property="storagePoolId" column="storage_pool_id"/>
+        <result property="sampleCount" column="sample_count"/>
+        <result property="tags" column="tags"/>
+        <result property="description" column="description"/>
+        <result property="license" column="license"/>
+        <result property="status" column="status"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">id, tenant_id, project_id, name, type, format, task_type, storage_pool_id, sample_count, tags,
+        description, license, status, created_by, created_at, updated_at</sql>
+
+    <select id="selectById" resultMap="datasetMap">
+        SELECT <include refid="cols"/> FROM dataset WHERE id = #{id}
+    </select>
+
+    <sql id="pageWhere">
+        <where>
+            <if test="keyword != null and keyword != ''">AND name ILIKE '%' || #{keyword} || '%'</if>
+            <if test="type != null and type != ''">AND type = #{type}</if>
+            <if test="taskType != null and taskType != ''">AND task_type = #{taskType}</if>
+            <if test="projectId != null">AND project_id = #{projectId}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            AND status &lt;&gt; 'deleted'
+        </where>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM dataset
+        <include refid="pageWhere"/>
+    </select>
+
+    <select id="page" resultMap="datasetMap">
+        SELECT <include refid="cols"/> FROM dataset
+        <include refid="pageWhere"/>
+        ORDER BY created_at DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.dataset.entity.Dataset" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO dataset (tenant_id, project_id, name, type, format, task_type, storage_pool_id, sample_count,
+                             tags, description, license, status, created_by)
+        VALUES (#{tenantId}, #{projectId}, #{name}, COALESCE(#{type}, 'text'), COALESCE(#{format}, 'jsonl'),
+                #{taskType}, #{storagePoolId}, COALESCE(#{sampleCount}, 0), #{tags}::jsonb,
+                #{description}, #{license}, COALESCE(#{status}, 'active'), #{createdBy})
+    </insert>
+
+    <update id="update" parameterType="com.aisys.dataset.entity.Dataset">
+        UPDATE dataset
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="type != null">type = #{type},</if>
+            <if test="format != null">format = #{format},</if>
+            <if test="taskType != null">task_type = #{taskType},</if>
+            <if test="storagePoolId != null">storage_pool_id = #{storagePoolId},</if>
+            <if test="sampleCount != null">sample_count = #{sampleCount},</if>
+            <if test="tags != null">tags = #{tags}::jsonb,</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="license != null">license = #{license},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="projectId != null">project_id = #{projectId},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="softDelete">
+        UPDATE dataset SET status = 'deleted', updated_at = NOW() WHERE id = #{id}
+    </update>
+</mapper>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.auth.mapper.RoleMapper">
+
+    <resultMap id="roleMap" type="com.aisys.auth.entity.Role">
+        <id property="id" column="id"/>
+        <result property="code" column="code"/>
+        <result property="name" column="name"/>
+        <result property="description" column="description"/>
+        <result property="isSystem" column="is_system"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <select id="selectAll" resultMap="roleMap">
+        SELECT id, code, name, description, is_system, created_at FROM role ORDER BY id
+    </select>
+
+    <select id="selectByCode" resultMap="roleMap">
+        SELECT id, code, name, description, is_system, created_at FROM role WHERE code = #{code}
+    </select>
+
+    <select id="selectById" resultMap="roleMap">
+        SELECT id, code, name, description, is_system, created_at FROM role WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.aisys.auth.entity.Role" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO role (code, name, description, is_system) VALUES (#{code}, #{name}, #{description}, COALESCE(#{isSystem}, false))
+    </insert>
+
+    <update id="update" parameterType="com.aisys.auth.entity.Role">
+        UPDATE role
+        SET name = #{name},
+            description = #{description}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM role WHERE id = #{id}
+    </delete>
+
+    <insert id="insertRolePermissions">
+        INSERT INTO role_permission (role_id, permission_id) VALUES
+        <foreach collection="permissionIds" item="pid" separator=",">(#{roleId}, #{pid})</foreach>
+        ON CONFLICT DO NOTHING
+    </insert>
+
+    <delete id="deleteRolePermissions">
+        DELETE FROM role_permission WHERE role_id = #{roleId}
+    </delete>
+
+    <select id="selectPermissionIdsByRoleId" resultType="long">
+        SELECT permission_id FROM role_permission WHERE role_id = #{roleId}
+    </select>
+</mapper>

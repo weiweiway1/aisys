@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.aisys</groupId>
+    <artifactId>aisys-platform</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>AI Model Evaluation Platform</name>
+    <description>AI模型测评平台 — 微服务后端（依据详细设计说明书 DDD.md 实现）</description>
+
+    <modules>
+        <module>aisys-common</module>
+        <module>aisys-gateway</module>
+        <module>aisys-auth</module>
+        <module>aisys-model</module>
+        <module>aisys-dataset</module>
+        <module>aisys-training</module>
+        <module>aisys-evaluation</module>
+        <module>aisys-resource</module>
+        <module>aisys-storage</module>
+        <module>aisys-notification</module>
+        <module>aisys-monitor</module>
+    </modules>
+
+    <properties>
+        <java.version>25</java.version>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Spring Cloud (2025.1.2 Oakwood SR2: compatible with Spring Boot 4.0.7 and introduces 4.1.0 compatibility) -->
+        <spring-cloud.version>2025.1.2</spring-cloud.version>
+        <!-- Spring Cloud Alibaba (2025.1.0.0: targets Spring Cloud 2025.1 / Boot 4.0.x) -->
+        <spring-cloud-alibaba.version>2025.1.0.0</spring-cloud-alibaba.version>
+
+        <!-- Native MyBatis for Spring Boot 4 (no MyBatis-Plus) -->
+        <mybatis-spring-boot.version>4.0.1</mybatis-spring-boot.version>
+
+        <!-- JWT (RS256) -->
+        <jjwt.version>0.12.6</jjwt.version>
+
+        <!-- AWS SDK v2 (S3 compatible client for SeaweedFS) -->
+        <awssdk.version>2.31.58</awssdk.version>
+
+        <!-- JSON -->
+        <jackson.version>2.18.3</jackson.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Cloud BOM -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Spring Cloud Alibaba BOM (Nacos discovery + config) -->
+            <dependency>
+                <groupId>com.alibaba.cloud</groupId>
+                <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+                <version>${spring-cloud-alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Native MyBatis (Spring Boot 4) -->
+            <dependency>
+                <groupId>org.mybatis.spring.boot</groupId>
+                <artifactId>mybatis-spring-boot-starter</artifactId>
+                <version>${mybatis-spring-boot.version}</version>
+            </dependency>
+
+            <!-- JJWT -->
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+
+            <!-- AWS SDK v2 BOM (S3 / STS against SeaweedFS S3 Gateway) -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${awssdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Internal common modules -->
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-security</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-mybatis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-redis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-s3</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-mq</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-log</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.aisys</groupId>
+                <artifactId>aisys-common-feign</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <release>${java.version}</release>
+                        <parameters>true</parameters>
+                        <encoding>UTF-8</encoding>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <configuration>
+                        <excludes>
+                            <exclude>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+    <!-- 仓库镜像由 deploy/maven-settings.xml 统一指向阿里云（本环境无法直连 repo1.maven.org / repo.spring.io）。
+         平台依赖均为 GA 版本（Spring Boot 4.1.0 / Spring Cloud 2025.1.2 / Alibaba 2025.1.0.0），均在 central，由镜像覆盖。 -->
+    <repositories>
+        <repository>
+            <id>central</id>
+            <url>https://repo1.maven.org/maven2</url>
+        </repository>
+    </repositories>
+</project>

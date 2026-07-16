@@ -1,0 +1,9 @@
+# 构建上下文排除项（避免把参考代码/构建产物/依赖打进镜像上下文）
+refs/
+**/target/
+**/.idea/
+**/.vscode/
+**/*.log
+aisys-web/node_modules/
+aisys-web/dist/
+.git/

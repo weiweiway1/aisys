@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.evaluation.mapper.EvaluationSubtaskMapper">
+
+    <resultMap id="SubtaskMap" type="com.aisys.evaluation.entity.EvaluationSubtask">
+        <id     property="id"             column="id"/>
+        <result property="parentTaskId"   column="parent_task_id"/>
+        <result property="tenantId"       column="tenant_id"/>
+        <result property="modelVersionId" column="model_version_id"/>
+        <result property="status"         column="status"/>
+        <result property="assignedNodeId" column="assigned_node_id"/>
+        <result property="errorMessage"   column="error_message"/>
+        <result property="startedAt"      column="started_at"/>
+        <result property="completedAt"    column="completed_at"/>
+        <result property="createdAt"      column="created_at"/>
+        <result property="updatedAt"      column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, parent_task_id, tenant_id, model_version_id, status, assigned_node_id,
+        error_message, started_at, completed_at, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.evaluation.entity.EvaluationSubtask"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO evaluation_subtask (parent_task_id, tenant_id, model_version_id, status)
+        VALUES (#{parentTaskId}, #{tenantId}, #{modelVersionId}, COALESCE(#{status}, 'pending'))
+    </insert>
+
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO evaluation_subtask (parent_task_id, tenant_id, model_version_id, status)
+        VALUES
+        <foreach collection="list" item="s" separator=",">
+            (#{s.parentTaskId}, #{s.tenantId}, #{s.modelVersionId}, COALESCE(#{s.status}, 'pending'))
+        </foreach>
+    </insert>
+
+    <select id="selectByIdAndTenant" resultMap="SubtaskMap">
+        SELECT <include refid="cols"/> FROM evaluation_subtask
+        WHERE id = #{id} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectByParentTaskId" resultMap="SubtaskMap">
+        SELECT <include refid="cols"/> FROM evaluation_subtask
+        WHERE parent_task_id = #{parentTaskId} AND tenant_id = #{tenantId}
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectByParentAndModel" resultMap="SubtaskMap">
+        SELECT <include refid="cols"/> FROM evaluation_subtask
+        WHERE parent_task_id = #{parentTaskId} AND model_version_id = #{modelVersionId}
+          AND tenant_id = #{tenantId}
+        LIMIT 1
+    </select>
+
+    <update id="updateStatus">
+        UPDATE evaluation_subtask
+        SET status = #{status},
+            <if test="assignedNodeId != null">assigned_node_id = #{assignedNodeId},</if>
+            error_message = #{errorMessage},
+            <if test="startedAt != null">started_at = #{startedAt},</if>
+            <if test="completedAt != null">completed_at = #{completedAt},</if>
+            updated_at = NOW()
+        WHERE id = #{id} AND tenant_id = #{tenantId}
+    </update>
+
+    <select id="countByStatus" resultType="com.aisys.evaluation.mapper.EvaluationSubtaskMapper$StatusCount">
+        SELECT status, COUNT(*) AS cnt
+        FROM evaluation_subtask
+        WHERE parent_task_id = #{parentTaskId} AND tenant_id = #{tenantId}
+        GROUP BY status
+    </select>
+
+    <update id="cancelByParentTaskId">
+        UPDATE evaluation_subtask
+        SET status = 'canceled', updated_at = NOW()
+        WHERE parent_task_id = #{parentTaskId} AND tenant_id = #{tenantId}
+          AND status IN ('pending', 'running')
+    </update>
+</mapper>

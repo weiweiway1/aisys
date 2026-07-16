@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisys.training.mapper.CheckpointMapper">
+
+    <resultMap id="cpMap" type="com.aisys.training.entity.Checkpoint">
+        <id property="id" column="id"/>
+        <result property="taskId" column="task_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="step" column="step"/>
+        <result property="storagePath" column="storage_path"/>
+        <result property="loss" column="loss"/>
+        <result property="metrics" column="metrics"/>
+        <result property="isActive" column="is_active"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, task_id, tenant_id, step, storage_path, loss,
+        metrics::text AS metrics, is_active, created_at
+    </sql>
+
+    <insert id="insert" parameterType="com.aisys.training.entity.Checkpoint"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO checkpoint (task_id, tenant_id, step, storage_path, loss, metrics, is_active)
+        VALUES (#{taskId}, #{tenantId}, #{step}, #{storagePath}, #{loss},
+                <choose><when test="metrics != null">CAST(#{metrics} AS JSONB)</when><otherwise>NULL</otherwise></choose>,
+                COALESCE(#{isActive}, false))
+    </insert>
+
+    <!-- 分两步在 Service 事务内执行（避免依赖 allowMultiQueries） -->
+    <update id="clearActiveByTaskId">
+        UPDATE checkpoint SET is_active = false WHERE task_id = #{taskId} AND is_active = true
+    </update>
+
+    <update id="setActive">
+        UPDATE checkpoint SET is_active = true WHERE id = #{id}
+    </update>
+
+    <select id="selectById" resultMap="cpMap">
+        SELECT <include refid="cols"/> FROM checkpoint WHERE id = #{id}
+    </select>
+
+    <select id="listByTaskId" resultMap="cpMap">
+        SELECT <include refid="cols"/> FROM checkpoint WHERE task_id = #{taskId}
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="selectActiveByTaskId" resultMap="cpMap">
+        SELECT <include refid="cols"/> FROM checkpoint WHERE task_id = #{taskId} AND is_active = true
+        LIMIT 1
+    </select>
+</mapper>
