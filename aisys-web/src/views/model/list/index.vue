@@ -22,6 +22,9 @@ const MODEL_CHUNK_SIZE = 16 * 1024 * 1024;
 
 defineOptions({ name: "ModelList" });
 
+// ★★★ 强制确认组件是否加载（浏览器 Console 必须看到这行） ★★★
+console.log("[ModelList-V2] 组件脚本开始执行", { timestamp: Date.now() });
+
 const router = useRouter();
 
 const loading = ref(false);
@@ -410,9 +413,25 @@ const onFileRemove = () => {
 };
 
 const handleCreate = async () => {
-  if (!formRef.value) return;
-  await formRef.value.validate(async valid => {
-    if (!valid) return;
+  // ★★★ 入口确认：点确定按钮后必须看到这行 ★★★
+  console.log("[ModelList-V2] ★ handleCreate 被调用!", {
+    hasFormRef: !!formRef.value,
+    selectedFile: selectedFile.value ? { name: selectedFile.value.name, size: selectedFile.value.size } : null,
+    formValues: { ...form }
+  });
+
+  if (!formRef.value) {
+    console.error("[ModelList-V2] ❌ formRef.value 为空! 提前返回");
+    return;
+  }
+
+  try {
+    await formRef.value.validate(async valid => {
+      console.log("[ModelList-V2] 表单验证结果:", valid);
+      if (!valid) {
+        console.warn("[ModelList-V2] ❌ 表单验证未通过，停止");
+        return;
+      }
 
     // 无文件时只创建元数据（兼容纯元数据场景）
     if (!selectedFile.value) {
@@ -573,10 +592,17 @@ const handleCreate = async () => {
       submitLoading.value = false;
       uploading.value = false;
     }
-  });
+    });  // end validate callback
+  } catch (e: any) {
+    console.error("[ModelList-V2] ❌ handleCreate 外层异常:", e);
+    ElMessage.error(e?.message || "操作失败");
+    submitLoading.value = false;
+    uploading.value = false;
+  }
 };
 
 onMounted(() => {
+  console.log("[ModelList-V2] ★ 组件已挂载，fetchList 开始");
   fetchList();
 });
 </script>
