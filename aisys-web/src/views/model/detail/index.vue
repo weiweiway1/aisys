@@ -161,15 +161,21 @@ const fixPresignUrl = (url: string): string => {
   }
 };
 
-/** PUT 分片到 S3 预签名 URL */
+/** PUT 分片到 S3 预签名 URL（带超时+诊断） */
 const uploadChunkToS3 = (
   url: string,
   blob: Blob,
   onProgress?: (loaded: number) => void
 ): Promise<string> => {
   return new Promise((resolve, reject) => {
+    const fixedUrl = fixPresignUrl(url);
+    const idxTag = `chunk#${Math.random().toString(36).slice(2, 6)}`;
+    console.log(`[Detail-Diag] ${idxTag} PUT开始 size=${blob.size}MB url=${fixedUrl.substring(0, 100)}...`);
+
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", fixPresignUrl(url));
+    xhr.open("PUT", fixedUrl);
+    xhr.timeout = 60000; // ★ 60秒超时，防止永久挂起
+
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
     if (onProgress && xhr.upload) {
       xhr.upload.onprogress = e => {
@@ -179,17 +185,33 @@ const uploadChunkToS3 = (
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         const etag = xhr.getResponseHeader("ETag") || `${Date.now()}`;
+        console.log(`[Detail-Diag] ${idxTag} ✅ HTTP ${xhr.status} etag=${etag}`);
         resolve(etag.replace(/"/g, ""));
       } else {
+        console.error(`[Detail-Diag] ${idxTag} ❌ HTTP ${xhr.status}`, xhr.responseText?.substring(0, 200));
         reject(new Error(`S3 上传失败: HTTP ${xhr.status}`));
       }
     };
-    xhr.onerror = () => reject(new Error("网络错误"));
+    xhr.ontimeout = () => {
+      console.error(`[Detail-Diag] ${idxTag} ⏰ 超时 60s! S3 无响应`);
+      reject(new Error("S3 上传超时（60s无响应）"));
+    };
+    xhr.onerror = (e) => {
+      console.error(`[Detail-Diag] ${idxTag} 🔌 网络错误`, e);
+      reject(new Error("网络错误：无法连接S3"));
+    };
     xhr.send(blob);
   });
 };
 
 const submitUpload = async () => {
+  console.log("[Detail-Diag] ★ submitUpload 开始", {
+    version: uploadForm.version,
+    hasFile: !!uploadForm.file,
+    fileSize: uploadForm.file?.size,
+    modelId: modelId.value
+  });
+
   if (!uploadForm.version.trim()) {
     ElMessage.warning("请输入版本号");
     return;
@@ -207,13 +229,16 @@ const submitUpload = async () => {
 
   try {
     // 1. 创建版本
+    console.log("[Detail-Diag] 步骤1: 创建版本...");
     const verRes: any = await createModelVersion(modelId.value, { version });
     if (!verRes || verRes.code !== 0) throw new Error(verRes?.message || "创建版本失败");
     const versionId = verRes.data.id;
+    console.log("[Detail-Diag] 步骤1 ✅ versionId=", versionId);
 
     // 2. 初始化上传
     uploadStatusText.value = "初始化上传...";
     const fileHash = await calculateFileHash(file);
+    console.log("[Detail-Diag] 步骤2: initiateUpload... fileSize=", file.size, "hash=", fileHash);
     const initRes: any = await initiateModelUpload(modelId.value, versionId, {
       fileSize: file.size,
       fileHash,
@@ -222,6 +247,12 @@ const submitUpload = async () => {
     if (!initRes || initRes.code !== 0) throw new Error(initRes?.message || "初始化上传失败");
 
     const initData: any = initRes.data;
+    console.log("[Detail-Diag] 步骤2 ✅ initiateUpload 返回:", {
+      dedup: initData.dedup,
+      uploadId: initData.uploadId,
+      chunkCount: initData.chunkCount,
+      firstUrl: initData?.chunkUrls?.[0]?.url?.substring(0, 120) + "...",
+    });
 
     // 秒传命中
     if (initData.dedup) {
