@@ -293,52 +293,99 @@ const calculateFileHash = (file: File): Promise<string> => {
   });
 };
 
-/** 修正 S3 预签名 URL 的 hostname：
- *  后端 S3_ENDPOINT 为 Docker 内部域名（如 seaweedfs:8333），
- *  浏览器无法解析，需替换为宿主机可访问的地址。
- *  策略：提取原 URL 端口（默认 8333），拼接当前页面 host 的主机名。
- */
-const fixPresignUrl = (url: string): string => {
+/** 诊断日志：带时间戳的 console 输出 */
+const diag = (msg: string, data?: any) => {
+  const ts = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  console.warn(`[DIAG ${ts}] ${msg}`, data ?? "");
+};
+
+/** 修正 S3 预签名 URL 的 hostname */
+const fixPresignUrl = (url: string): { fixed: string; changed: boolean; original: string } => {
   try {
     const u = new URL(url);
+    const original = url;
+    let changed = false;
     // 如果 hostname 不是 IP/localhost 且端口是 8333，做替换
     if (u.port === "8333" && !/^(localhost|127\.0\.0\.1|\d{1,3}(\.\d{1,3}){3})$/.test(u.hostname)) {
       const pageOrigin = window.location.origin;
       const pageHost = new URL(pageOrigin).hostname;
+      diag(`fixPresignUrl: 替换 hostname "${u.hostname}" → "${pageHost}"`);
       u.hostname = pageHost;
+      changed = true;
     }
-    return u.toString();
-  } catch {
-    return url; // 解析失败则原样返回
+    return { fixed: u.toString(), changed, original };
+  } catch (e) {
+    diag(`fixPresignUrl 解析失败`, e);
+    return { fixed: url, changed: false, original: url };
   }
 };
 
-/** 上传分片到 S3 预签名 URL（PUT 直传，带进度） */
+/** 上传分片到 S3 预签名 URL（PUT 直传，带诊断 + 超时） */
 const uploadChunkToS3 = (
   url: string,
   blob: Blob,
   onProgress?: (loaded: number) => void
 ): Promise<string> => {
   return new Promise((resolve, reject) => {
+    const { fixed, changed, original } = fixPresignUrl(url);
+    const idxTag = `chunk#${Math.random().toString(36).slice(2, 6)}`;
+    diag(`${idxTag} 开始上传 blob.size=${blob.size} bytes=${blob.size / 1024 / 1024}MB`, {
+      originalHost: new URL(original).hostname,
+      fixedHost: new URL(fixed).hostname,
+      urlChanged: changed,
+      fullUrl: fixed.substring(0, 120) + "..."
+    });
+
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", fixPresignUrl(url));
+    xhr.open("PUT", fixed);
+
+    // ★ 关键修复：加 60 秒超时，避免永久挂起
+    xhr.timeout = 60000;
+
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
     if (onProgress && xhr.upload) {
       xhr.upload.onprogress = e => {
         if (e.lengthComputable) onProgress(e.loaded);
       };
     }
+
     xhr.onload = () => {
+      diag(`${idxTag} onload status=${xhr.status} etag=${xhr.getResponseHeader("ETag")}`, {
+        responseText: xhr.responseText?.substring(0, 200),
+        allResponseHeaders: xhr.getAllResponseHeaders()?.substring(0, 300)
+      });
       if (xhr.status >= 200 && xhr.status < 300) {
-        // S3 返回 ETag 在响应头中
         const etag = xhr.getResponseHeader("ETag") || `${Date.now()}`;
         resolve(etag.replace(/"/g, ""));
       } else {
-        reject(new Error(`S3 上传失败: HTTP ${xhr.status}`));
+        reject(new Error(`S3 上传失败: HTTP ${xhr.status} ${xhr.statusText}`));
       }
     };
-    xhr.onerror = () => reject(new Error("网络错误"));
+
+    xhr.onerror = () => {
+      diag(`${idxTag} onerror 触发！网络层错误`);
+      reject(new Error("网络错误（XHR onerror）"));
+    };
+
+    xhr.ontimeout = () => {
+      diag(`${idxTag} ontimout 触发！超过 60 秒无响应`);
+      reject(new Error("上传超时（60s无响应）— S3 可能不可达或签名无效"));
+    };
+
+    const startTime = Date.now();
     xhr.send(blob);
+
+    // 监控：如果 10 秒内没有任何进度变化，打警告
+    let lastLoaded = 0;
+    const progressMonitor = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      if (elapsed > 10000 && lastLoaded === 0 && xhr.readyState !== 4) {
+        diag(`${idxTag} ⚠️ 已等待 ${elapsed / 1000}s 但 upload 进度仍为 0，readyState=${xhr.readyState}`);
+      }
+      if (xhr.readyState === 4) clearInterval(progressMonitor);
+    }, 5000);
+    xhr.addEventListener("loadend", () => clearInterval(progressMonitor), { once: true });
   });
 };
 
@@ -400,6 +447,8 @@ const handleCreate = async () => {
     uploadStatusText.value = "创建模型...";
 
     try {
+      diag(`=== 开始上传流程 file=${file.name} size=${file.size} (${(file.size / 1024 / 1024).toFixed(1)}MB) ===`);
+
       // 1. 创建模型（元数据）
       const modelRes: any = await createModel({
         name: form.name,
@@ -409,16 +458,19 @@ const handleCreate = async () => {
       });
       if (!modelRes || modelRes.code !== 0) throw new Error(modelRes?.message || "创建模型失败");
       const modelId = modelRes.data.id;
+      diag(`步骤1 ✅ 创建模型 modelId=${modelId}`);
       uploadStatusText.value = "创建版本...";
 
       // 2. 创建版本（status=creating）
       const verRes: any = await createModelVersion(modelId, { version: form.version.trim() });
       if (!verRes || verRes.code !== 0) throw new Error(verRes?.message || "创建版本失败");
       const versionId = verRes.data.id;
+      diag(`步骤2 ✅ 创建版本 versionId=${versionId}`);
       uploadStatusText.value = "初始化上传...";
 
       // 3. 计算文件 hash（秒传检测）
       const fileHash = await calculateFileHash(file);
+      diag(`步骤3 ✅ fileHash=${fileHash}`);
 
       // 4. 初始化分片上传（获取预签名 URL）
       const initRes: any = await initiateModelUpload(modelId, versionId, {
@@ -429,6 +481,9 @@ const handleCreate = async () => {
       if (!initRes || initRes.code !== 0) throw new Error(initRes?.message || "初始化上传失败");
 
       const initData: any = initRes.data;
+      diag(`步骤4 ✅ initiateUpload dedup=${initData.dedup} chunkCount=${initData.chunkCount} chunkSize=${initData.chunkSize} uploadId=${initData.uploadId}`, {
+        firstChunkUrl: initData?.chunkUrls?.[0]?.url?.substring(0, 100) + "..."
+      });
 
       // 秒传命中，直接完成
       if (initData.dedup) {
@@ -450,6 +505,7 @@ const handleCreate = async () => {
       // 5. 分片直传到 S3
       const chunkCount = initData.chunkCount;
       const chunkUrls = initData.chunkUrls ?? [];
+      diag(`步骤5 开始分片上传 totalChunks=${chunkCount} concurrency=3`);
       const loaded = new Array(chunkCount).fill(0);
       const updateProgress = () => {
         const sum = loaded.reduce((a, b) => a + b, 0);
@@ -468,11 +524,13 @@ const handleCreate = async () => {
           const start = idx * MODEL_CHUNK_SIZE;
           const end = Math.min(start + MODEL_CHUNK_SIZE, file.size);
           const blob = file.slice(start, end);
+          diag(`  worker: 开始分片 ${idx + 1}/${chunkCount} start=${start} end=${end}`);
           const etag = await uploadChunkToS3(
             chunkUrls[idx]?.url,
             blob,
             l => { loaded[idx] = l; updateProgress(); }
           );
+          diag(`  worker: ✅ 分片 ${idx + 1}/${chunkCount} etag=${etag}`);
           loaded[idx] = end - start;
           updateProgress();
           parts.push({ partNumber: idx + 1, etag });
@@ -483,13 +541,16 @@ const handleCreate = async () => {
       };
 
       // 并发上传（最多 3 个并发 worker）
+      diag(`启动 ${Math.min(3, chunkCount)} 个并发 worker...`);
       const workers = Array.from({ length: Math.min(3, chunkCount) }, () => worker());
       const allParts = (await Promise.all(workers)).flat();
+      diag(`步骤5 ✅ 所有分片上传完成 totalParts=${allParts.length}`);
 
       // 按 partNumber 排序（保证顺序正确）
       allParts.sort((a, b) => a.partNumber - b.partNumber);
 
       // 6. 完成上传
+      diag(`步骤6 通知后端组装 uploadId=${initData.uploadId} parts=${allParts.length}`);
       uploadStatusText.value = "后端组装中...";
       uploadProgress.value = 99;
       const compRes2: any = await completeModelUpload(modelId, versionId, {
@@ -506,6 +567,7 @@ const handleCreate = async () => {
       dialogVisible.value = false;
       fetchList();
     } catch (e: any) {
+      diag(`❌ 上传流程异常: ${e?.message}`, e);
       ElMessage.error(e?.message || "上传失败");
     } finally {
       submitLoading.value = false;
