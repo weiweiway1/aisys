@@ -39,4 +39,23 @@ public class EvaluationRabbitConfig {
     // 生产 task.command：exchange = CommonConstants.EXCHANGE_TASK_COMMAND，routing = ROUTING_EVAL_COMMAND
     // 消费 task.status ：queue = QUEUE_EVAL_STATUS，binding routing = ROUTING_EVAL_STATUS
     public static final String ROUTING_EVAL_COMMAND = "task.command.eval";
+
+    // ════════════════════════════════════════
+    // 模型发布事件监听（自动评测触发）
+    // exchange = notification.event（由 common-mq 声明），routing = MODEL.#
+    // ════════════════════════════════════════
+    public static final String QUEUE_MODEL_PUBLISHED = "q.evaluation.model.published";
+    public static final String ROUTING_MODEL_PUBLISHED = "MODEL.#";
+
+    @Bean
+    public Queue modelPublishedQueue() {
+        return QueueBuilder.durable(QUEUE_MODEL_PUBLISHED).build();
+    }
+
+    @Bean
+    public Binding modelPublishedBinding(TopicExchange notificationEventExchange) {
+        return BindingBuilder.bind(modelPublishedQueue())
+                .to(notificationEventExchange)
+                .with(ROUTING_MODEL_PUBLISHED);
+    }
 }

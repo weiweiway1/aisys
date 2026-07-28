@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 //   - 「每个模型是一个容器」：从存储池下载镜像 tar（docker load）+ 数据集，挂载后 docker run 真实模型容器，
 //     解析其统一脚本输出的 JSONL（status/log/metric/result）实时回传平台。
 //   - 兼容旧路径：无镜像 tar 时回退到内置 CPU 模拟脚本（step 行 + RESULT）。
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[;?0-9]*[ -/]*[@-~]`)
+
 type Executor struct {
 	cfg     *Config
 	mu      sync.Mutex
@@ -84,7 +87,12 @@ func (e *Executor) runModelContainer(cmd *Command, agent *Agent) {
 				e.reportTerminal(agent, cmd, "failed", "", "下载/加载镜像失败: "+err.Error())
 				return
 			}
-			if imageName == "" {
+			// ★ 始终使用 docker load 解析出的实际镜像标签（tar 内部标签可能与 config 中的 imageName 不一致，
+			//   例如用户打包时用 docker build -t yolo:v1 但数据库填的是 yolo:v2）
+			if loaded != "" {
+				if loaded != imageName {
+					log.Printf("[agent] 镜像标签修正: config=%q → tar实际=%q", imageName, loaded)
+				}
 				imageName = loaded
 			}
 		}
@@ -122,16 +130,32 @@ func (e *Executor) runModelContainer(cmd *Command, agent *Agent) {
 		}
 	}
 
-	name := fmt.Sprintf("task-%d", cmd.TaskID)
-	args := []string{"run", "--rm", "--name", name,
-		"-v", datasetDir + ":/data/dataset:ro",
-		"-v", outputDir + ":/output",
-		"-e", "AISYS_DATASET_DIR=/data/dataset",
-		"-e", "AISYS_OUTPUT_DIR=/output",
-	}
+	// 任务模式（提前声明：resolveDatasetMountDir 需要用）
 	taskMode := cmd.TaskMode
 	if taskMode == "" {
 		taskMode = "train"
+	}
+
+	// 检测数据集格式并选择正确的挂载目录（平台侧处理，模型零感知）：
+	//   - 三分割格式(train/val/test)：根据 taskMode 选择子目录，rw 挂载（Ultralytics 等框架需要写缓存）
+	//   - 扁平 ImageFolder 格式：整体 ro 挂载（安全默认值）
+	effectiveDatasetDir, datasetMode := resolveDatasetMountDir(datasetDir, taskMode)
+
+	datasetRoRw := ":ro" // 默认只读（扁平格式 / 安全）
+	if datasetMode == "split" {
+		datasetRoRw = ":rw" // 三分割需要写缓存
+	}
+
+	name := fmt.Sprintf("task-%d", cmd.TaskID)
+	args := []string{"run", "--rm", "-t", "--name", name,
+		"-v", effectiveDatasetDir + ":/data/dataset" + datasetRoRw,
+		"-v", outputDir + ":/output",
+		"-e", "AISYS_DATASET_DIR=/data/dataset",
+		"-e", "AISYS_OUTPUT_DIR=/output",
+		"-e", "PYTHONUNBUFFERED=1",
+	}
+	if datasetMode == "split" {
+		args = append(args, "-e", "AISYS_DATASET_FORMAT=split")
 	}
 	args = append(args, "-e", "AISYS_TASK="+taskMode)
 	if cmd.DatasetFormat != "" {
@@ -169,6 +193,10 @@ func (e *Executor) runModelContainer(cmd *Command, agent *Agent) {
 				log.Printf("[agent] 上传训练产物失败 taskId=%d: %v", cmd.TaskID, err)
 			} else {
 				log.Printf("[agent] 已上传训练产物 best.pt taskId=%d", cmd.TaskID)
+				agent.send(Report{Type: "status", TaskID: cmd.TaskID, TaskType: cmd.TaskType, Data: map[string]any{
+					"status": "completed", "progress": 100, "outputUploaded": true,
+					"outputPath": fmt.Sprintf("training/%d/output/best.pt", cmd.TaskID),
+				}})
 			}
 		} else {
 			log.Printf("[agent] 无 best.pt 可上传 taskId=%d（路径 %s）", cmd.TaskID, best)
@@ -227,7 +255,7 @@ func (e *Executor) runDockerAndStream(cmd *Command, agent *Agent, image string, 
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var result map[string]any
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := cleanLogLine(scanner.Text())
 		if jsonlMode {
 			parsed := e.handleJsonlLine(line, cmd, agent)
 			if parsed != nil {
@@ -290,7 +318,7 @@ func (e *Executor) handleJsonlLine(line string, cmd *Command, agent *Agent) map[
 		agent.send(Report{Type: "status", TaskID: cmd.TaskID, TaskType: cmd.TaskType, Data: obj})
 	case "log":
 		agent.send(Report{Type: "log", TaskID: cmd.TaskID, TaskType: cmd.TaskType,
-			Level: strOr(obj, "level", "INFO"), Message: strOr(obj, "message", ""), Data: obj})
+			Level: strOr(obj, "level", "INFO"), Message: cleanLogLine(strOr(obj, "message", "")), Data: obj})
 	case "metric":
 		m, _ := obj["metrics"].(map[string]any)
 		if m == nil {
@@ -633,9 +661,84 @@ func parseStep(line string) map[string]any {
 	return m
 }
 
+func cleanLogLine(line string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 && r != '\t' && r != '\n' && r != '\r' {
+			return -1
+		}
+		return r
+	}, ansiEscapeRE.ReplaceAllString(line, ""))
+}
+
 func strOr(m map[string]any, key, def string) string {
 	if v, ok := m[key]; ok && v != nil {
 		return fmt.Sprintf("%v", v)
 	}
 	return def
+}
+
+// resolveDatasetMountDir 检测数据集目录结构，返回应挂载到容器的路径和格式标识。
+// 平台侧处理此逻辑后，模型 run.py 无需关心数据集是三分割还是扁平格式——它看到的 /data/dataset
+// 总是可直接使用的 ImageFolder 目录。
+//
+// 返回值：
+//   - mountPath: 实际挂载到容器 /data/dataset 的宿主路径
+//   - mode: "split"（三分割子目录）或 "flat"（扁平 ImageFolder）
+func resolveDatasetMountDir(datasetDir string, taskMode string) (mountPath string, mode string) {
+	entries, err := os.ReadDir(datasetDir)
+	if err != nil || len(entries) == 0 {
+		return datasetDir, "flat"
+	}
+
+	// 检测三分割格式：要求 train/val/test 中至少 2 个是有效目录（含文件）
+	splitNames := map[string]bool{"train": false, "val": false, "test": false}
+	validSplits := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, ok := splitNames[e.Name()]; ok {
+			subPath := filepath.Join(datasetDir, e.Name())
+			if subs, err := os.ReadDir(subPath); err == nil && len(subs) > 0 {
+				splitNames[e.Name()] = true
+				validSplits++
+			}
+		}
+	}
+
+	// 有效分割不足 2 个 → 按扁平格式处理
+	if validSplits < 2 {
+		return datasetDir, "flat"
+	}
+
+	// 根据任务模式选择挂载的子目录
+	var chosen string
+	switch taskMode {
+	case "eval", "evaluate", "evaluation":
+		// 评测优先用验证集，备选用测试集，最后兜底训练集
+		if splitNames["val"] {
+			chosen = "val"
+		} else if splitNames["test"] {
+			chosen = "test"
+		} else {
+			chosen = "train"
+		}
+	case "train", "training":
+		// 训练优先用训练集（后续 run.py 可自行合并 val 做早停）
+		if splitNames["train"] {
+			chosen = "train"
+		} else {
+			for s, ok := range splitNames {
+				if ok { chosen = s; break }
+			}
+		}
+	default:
+		for s, ok := range splitNames {
+			if ok { chosen = s; break }
+		}
+	}
+
+	mountPath = filepath.Join(datasetDir, chosen)
+	log.Printf("[agent] 三分割数据集检测: 任务=%s, 选择 %s/ → %s (rw)", taskMode, chosen, mountPath)
+	return mountPath, "split"
 }

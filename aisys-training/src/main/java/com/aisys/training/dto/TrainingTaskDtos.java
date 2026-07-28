@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -55,7 +56,9 @@ public final class TrainingTaskDtos {
             Instant completedAt,
             Long createdBy,
             Instant createdAt,
-            Instant updatedAt
+            Instant updatedAt,
+            /** 训练产物（检查点/权重文件）列表，仅在详情接口填充 */
+            List<CheckpointDto> checkpoints
     ) {}
 
     /** 日志行响应。 */

@@ -55,6 +55,13 @@ aisys:
   outbox:
     enabled: true           # 评测生产 task.command 事件
     poll-interval-ms: 3000
+  # ==================== LLM 配置（评测报告生成）====================
+  # URL 必填；API Key 可选（本地部署模型如 Ollama/vLLM 通常不需要）
+  llm:
+    url: ${LLM_URL:http://host.docker.internal:11434/api/generate}                                # 例: https://api.openai.com 或 http://localhost:11434 (Ollama)
+    api-key: ${LLM_API_KEY:}                        # 可选，本地模型留空即可
+    model: ${LLM_MODEL:"qwen2:latest"}               # 模型名称
+    timeout-seconds: ${LLM_TIMEOUT_SECONDS:120}      # 超时秒数
 
 management:
   endpoints:

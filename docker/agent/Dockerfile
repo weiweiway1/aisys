@@ -8,6 +8,7 @@ RUN --mount=type=cache,target=/root/.cache --mount=type=cache,target=/root/gomod
     CGO_ENABLED=0 go build -o /agent .
 
 FROM alpine:3.21
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 RUN apk add --no-cache docker-cli docker-cli-compose ca-certificates tzdata
 COPY --from=build /agent /usr/local/bin/agent
 ENV TZ=Asia/Shanghai

@@ -93,4 +93,11 @@
     <delete id="deleteByIdAndTenant">
         DELETE FROM benchmark WHERE id = #{id} AND tenant_id = #{tenantId}
     </delete>
+
+    <select id="selectActiveByTenant" resultMap="BenchmarkMap">
+        SELECT <include refid="cols"/> FROM benchmark
+        WHERE tenant_id = #{tenantId} AND status = 'active'
+        ORDER BY created_at ASC
+        LIMIT 1
+    </select>
 </mapper>

@@ -17,7 +17,9 @@ COPY docker/web/platform-config.default.json /app/dist/platform-config.json
 
 FROM nginx:1.27-alpine
 
-RUN apk add --no-cache jq
+# 使用阿里云镜像源（官方 CDN 的 community 仓库在国内常连不上，jq 在 community 中）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
+    apk add --no-cache jq
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY docker/web/docker-entrypoint.d/99-platform-config.sh /docker-entrypoint.d/99-platform-config.sh

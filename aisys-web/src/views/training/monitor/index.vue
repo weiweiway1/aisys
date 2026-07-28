@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
+import { Document, Download } from "@element-plus/icons-vue";
 import { useDark, useECharts } from "@pureadmin/utils";
 import {
   getTaskDetail,
@@ -9,8 +10,10 @@ import {
   getTaskLogs,
   type TrainingTask,
   type TrainingMetricPoint,
-  type TrainingLog
+  type TrainingLog,
+  type Checkpoint
 } from "@/api/training";
+import { downloadFile } from "@/api/storage";
 
 defineOptions({ name: "TrainingMonitor" });
 
@@ -64,6 +67,33 @@ const logs = ref<TrainingLog[]>([]);
 const logQuery = reactive({ page: 1, size: 200 });
 const logTotal = ref(0);
 const logBoxRef = ref<HTMLDivElement | null>(null);
+const ansiPattern = /\x1b\[[;?0-9]*[ -/]*[@-~]/g;
+
+const normalizedLogs = computed(() =>
+  logs.value.map(log => ({
+    ...log,
+    displayTime: formatLogTime(log.loggedAt ?? log.ts),
+    displayMessage: sanitizeLogMessage(log.message)
+  }))
+);
+
+
+function sanitizeLogMessage(message?: string) {
+  return String(message ?? "")
+    .replace(ansiPattern, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+}
+
+function formatLogTime(value?: string | number) {
+  if (value == null || value === "") return "-";
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+function isDownloadableCheckpoint(cp: Checkpoint) {
+  return Boolean(cp.storagePath) && !cp.storagePath.startsWith("internal://");
+}
 
 async function loadDetail() {
   try {
@@ -244,6 +274,17 @@ onBeforeUnmount(() => {
 function goBack() {
   router.push("/training/list");
 }
+
+/** 下载权重文件 */
+function handleDownload(cp: Checkpoint) {
+  if (!isDownloadableCheckpoint(cp)) {
+    ElMessage.warning("该检查点没有可下载的文件路径");
+    return;
+  }
+  const fileName = cp.storagePath.split("/").pop() || "weights.pt";
+  ElMessage.info(`正在下载: ${fileName}`);
+  downloadFile({ path: cp.storagePath });
+}
 </script>
 
 <template>
@@ -304,6 +345,47 @@ function goBack() {
       </div>
     </el-card>
 
+    <!-- 训练产物（任务完成且有检查点时显示） -->
+    <el-card v-if="task?.status === 'completed' && task.checkpoints && task.checkpoints.length > 0" shadow="never" class="mb-4">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <span class="font-bold">训练产物</span>
+          <el-tag type="success" size="small" effect="light">训练完成</el-tag>
+        </div>
+      </template>
+      <div class="flex flex-col gap-3">
+        <div
+          v-for="cp in task.checkpoints"
+          :key="cp.id"
+          class="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900/50"
+        >
+          <div class="flex items-center gap-3 min-w-0">
+            <el-icon :size="24" class="text-blue-500 flex-shrink-0"><Document /></el-icon>
+            <div class="min-w-0">
+              <div class="font-medium text-sm truncate">
+                {{ cp.storagePath ? cp.storagePath.split('/').pop() || cp.storagePath : '权重文件' }}
+              </div>
+              <div class="text-xs text-gray-400 mt-0.5">
+                Step {{ cp.step ?? '-' }}
+                <span v-if="cp.loss != null" class="ml-2">Loss: {{ typeof cp.loss === 'number' ? cp.loss.toFixed(4) : cp.loss }}</span>
+                <span v-if="cp.createdAt" class="ml-2">{{ cp.createdAt }}</span>
+              </div>
+            </div>
+          </div>
+          <el-button
+            type="primary"
+            size="small"
+            @click="handleDownload(cp)"
+            :disabled="!isDownloadableCheckpoint(cp)"
+            class="flex-shrink-0 ml-3"
+          >
+            <template #icon><Download /></template>
+            下载权重
+          </el-button>
+        </div>
+      </div>
+    </el-card>
+
     <el-row :gutter="16">
       <!-- 指标图表 -->
       <el-col :xs="24" :md="14" :lg="15">
@@ -329,11 +411,11 @@ function goBack() {
             class="log-box"
           >
             <div
-              v-for="(log, idx) in logs"
+              v-for="(log, idx) in normalizedLogs"
               :key="idx"
               class="log-line"
             >
-              <span class="log-ts">{{ log.loggedAt || log.ts }}</span>
+              <span class="log-ts">{{ log.displayTime }}</span>
               <el-tag
                 size="small"
                 :type="logType(log.level) as any"
@@ -342,7 +424,7 @@ function goBack() {
               >
                 {{ (log.level || "info").toUpperCase() }}
               </el-tag>
-              <span class="log-msg">{{ log.message }}</span>
+              <span class="log-msg">{{ log.displayMessage }}</span>
             </div>
             <div v-if="!logs.length && !logsLoading" class="log-empty">
               暂无日志
@@ -367,11 +449,12 @@ function goBack() {
 }
 
 .log-line {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   padding: 2px 0;
-  word-break: break-all;
+  word-break: normal;
 }
 
 .log-ts {
@@ -387,6 +470,7 @@ function goBack() {
 .log-msg {
   flex: 1;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .log-empty {

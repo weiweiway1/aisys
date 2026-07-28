@@ -142,6 +142,24 @@ export const getUploadTask = (taskId: number | string) => {
   return http.request<Result>("get", `/api/v1/files/upload-tasks/${taskId}`);
 };
 
+/* ----------------------- 文件下载（浏览器代理） ----------------------- */
+
+/**
+ * 下载存储池中的文件（浏览器代理模式，流式回传）。
+ * 后端从 SeaweedFS/S3 读取文件流，透传给浏览器，自动触发下载。
+ *
+ * @param params.path  存储路径（如 "models/yolov2/v1/best.pt"）
+ * @param params.poolId 存储池 ID（可选，默认使用默认池）
+ * @returns 触发浏览器文件下载
+ */
+export const downloadFile = (params: { path: string; poolId?: number }) => {
+  const qs = new URLSearchParams();
+  if (params.poolId) qs.set("poolId", String(params.poolId));
+  qs.set("path", params.path);
+  // 使用 window.open 触发浏览器原生下载，避免 axios 拦截二进制流
+  window.open(`/api/v1/files/download?${qs.toString()}`, "_blank");
+};
+
 /** 上传单片（XHR，浏览器→后端，带进度）。后端再写 S3 part 到存储池。 */
 export const uploadTaskChunk = (
   taskId: number | string,

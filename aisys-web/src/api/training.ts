@@ -44,11 +44,29 @@ export interface TrainingTask {
   node?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** 训练产物（检查点/权重文件），仅在详情接口返回 */
+  checkpoints?: Checkpoint[];
+}
+
+/** 训练检查点（权重文件） */
+export interface Checkpoint {
+  id: number;
+  taskId: number;
+  step: number;
+  storagePath: string;
+  loss?: number;
+  metrics?: Record<string, any>;
+  isActive?: boolean;
+  createdAt?: string;
 }
 
 /** 单条训练日志 */
 export interface TrainingLog {
-  ts: string | number;
+  id?: number;
+  taskId?: number;
+  ts?: string | number;
+  loggedAt?: string;
+  step?: number;
   level: string;
   message: string;
 }

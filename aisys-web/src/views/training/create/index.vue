@@ -9,6 +9,15 @@ import { getDatasetList } from "@/api/dataset";
 const router = useRouter();
 const loading = ref(false);
 
+// 内存预设选项（MB）
+const memoryPresets = [
+  { label: "512 MB", value: 512 },
+  { label: "1 GB", value: 1024 },
+  { label: "2 GB", value: 2048 },
+  { label: "4 GB", value: 4096 },
+  { label: "8 GB", value: 8192 },
+];
+
 // 模型版本 / 数据集版本候选（扁平化）
 const modelVersionOptions = ref<Array<{
   modelVersionId: number | string;
@@ -33,8 +42,16 @@ const form = reactive({
   imgsz: 64,
   gpuCount: 0,
   cpu: 2,
-  memoryBytes: 2147483648
+  memoryMB: 2048 // 改为 MB 单位，默认 2GB
 });
+
+/** 将 MB 转为 Bytes 提交 */
+const memoryBytes = computed(() => form.memoryMB * 1024 * 1024);
+
+/** 应用内存预设 */
+const applyMemoryPreset = (mb: number) => {
+  form.memoryMB = mb;
+};
 
 const selectedModel = computed(() =>
   modelVersionOptions.value.find(m => m.modelVersionId === form.modelVersionId)
@@ -70,7 +87,7 @@ async function loadModelVersions() {
         const cfg = v.config || {};
         flat.push({
           modelVersionId: v.id,
-          label: `${m.name} @ ${v.version}`,
+          label: `${m.name}-${v.version}`,
           imageName: cfg.imageName,
           imageTarRelPath: v.storagePath,
           type: m.type // 模型任务类型（与数据集 taskType 一致）
@@ -96,7 +113,7 @@ async function loadDatasetVersions() {
         if (v.status !== "ready") continue;
         flat.push({
           datasetVersionId: v.id,
-          label: `${d.name} @ ${v.version}`,
+          label: `${d.name}-${v.version}`,
           datasetRelPath: v.storagePath,
           datasetFormat: d.format || (v.storagePath ? v.storagePath.split(".").pop() : ""),
           taskType: d.taskType // 数据集任务类型（与模型 type 一致）
@@ -139,7 +156,7 @@ const submit = async () => {
         resourceSpec: {
           gpuCount: Number(form.gpuCount),
           cpu: Number(form.cpu),
-          memoryBytes: Number(form.memoryBytes)
+          memoryBytes: memoryBytes.value
         }
       }
     });
@@ -189,21 +206,48 @@ onMounted(() => {
           </div>
         </el-form-item>
         <el-form-item label="Epochs">
-          <el-input-number v-model="form.epochs" :min="1" :max="100" />
+          <el-input-number v-model="form.epochs" :min="1" :max="1000" />
+          <span class="ml-2 text-xs text-gray-400">完整遍历数据集的次数，建议 50~300</span>
         </el-form-item>
         <el-form-item label="图像尺寸">
           <el-input-number v-model="form.imgsz" :min="32" :max="1024" :step="32" />
-          <span class="ml-2 text-xs text-gray-400">imgsz，CPU 建议 64</span>
+          <span class="ml-2 text-xs text-gray-400">imgsz，CPU 建议 64，GPU 可用 320/640</span>
         </el-form-item>
         <el-form-item label="GPU 数">
           <el-input-number v-model="form.gpuCount" :min="0" :max="8" />
-          <span class="ml-2 text-xs text-gray-400">CPU 节点填 0</span>
+          <span class="ml-2 text-xs text-gray-400">无 GPU 则填 0（使用 CPU 训练）</span>
         </el-form-item>
         <el-form-item label="CPU 核">
-          <el-input-number v-model="form.cpu" :min="1" />
+          <el-input-number v-model="form.cpu" :min="1" :max="64" />
+          <span class="ml-2 text-xs text-gray-400">建议 2~4 核</span>
         </el-form-item>
-        <el-form-item label="内存 (Bytes)">
-          <el-input-number v-model="form.memoryBytes" :min="0" :step="536870912" />
+        <el-form-item label="内存限制">
+          <div class="flex items-center gap-3 w-full">
+            <el-input-number
+              v-model="form.memoryMB"
+              :min="128"
+              :max="65536"
+              :step="512"
+              :precision="0"
+              style="width: 160px"
+            />
+            <span class="text-sm font-medium text-gray-600 whitespace-nowrap">MB</span>
+            <span class="text-xs text-gray-400">（≈ {{ (form.memoryMB / 1024).toFixed(1) }} GB）</span>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <el-button
+              v-for="p in memoryPresets"
+              :key="p.value"
+              size="small"
+              :type="form.memoryMB === p.value ? 'primary' : 'default'"
+              @click="applyMemoryPreset(p.value)"
+            >
+              {{ p.label }}
+            </el-button>
+          </div>
+          <div class="mt-1 text-xs text-gray-400">
+            容器运行时的内存上限。小模型/CPU 训练建议 1~2GB，GPU 大模型训练建议 8GB+
+          </div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="submit">创建并启动</el-button>

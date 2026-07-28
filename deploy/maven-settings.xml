@@ -2,7 +2,7 @@
 <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
-  <!-- 阿里云镜像：本环境无法直连 repo1.maven.org。所有依赖均为 GA 版本（均在 central，由 aliyun-public 聚合覆盖）。
+  <!-- 多镜像容错：主用阿里云，备选腾讯云。任一可用即可完成构建。
        不额外声明 spring-milestones/spring-plugin 仓库（它们对 central 产物返回 HTML 错误页污染校验和）。 -->
   <mirrors>
     <mirror>
@@ -12,4 +12,24 @@
       <url>https://maven.aliyun.com/repository/public</url>
     </mirror>
   </mirrors>
+
+  <!-- 备选仓库：当阿里云 DNS 不可用时自动降级 -->
+  <profiles>
+    <profile>
+      <id>fallback-mirrors</id>
+      <repositories>
+        <repository>
+          <id>tencent-public</id>
+          <name>Tencent Public</name>
+          <url>https://mirrors.cloud.tencent.com/nexus/repository/maven-public/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+      </repositories>
+    </profile>
+  </profiles>
+
+  <activeProfiles>
+    <activeProfile>fallback-mirrors</activeProfile>
+  </activeProfiles>
 </settings>

@@ -65,6 +65,7 @@ public class ForwardServiceImpl implements ForwardService {
         m.setNodeId(node == null ? null : node.getId());
         // 恢复评测子任务关联（subtaskId/modelVersionId，调度时缓存）+ 提取结果分数（来自 Agent result 帧）
         enrichEvalStatus(m, msg);
+        enrichTrainingStatus(m, msg);
         publish(m, CommonConstants.EXCHANGE_TASK_STATUS,
                 ResourceConstants.ROUTING_KEY_TASK_STATUS_PREFIX + lower(msg.taskType()),
                 msg);
@@ -112,6 +113,42 @@ public class ForwardServiceImpl implements ForwardService {
             Object dp = data.get("detailPath");
             m.setDetailPath(dp == null ? null : String.valueOf(dp));
         }
+    }
+
+
+    private void enrichTrainingStatus(TaskStatusMessage m, WebSocketMessage msg) {
+        if (!"TRAINING".equalsIgnoreCase(msg.taskType()) || msg.taskId() == null) return;
+        String status = m.getStatus();
+        if (!"completed".equalsIgnoreCase(status)) return;
+        java.util.Map<String, Object> data = msg.data();
+        if (data == null) return;
+        String storagePath = firstText(data, "outputPath", "artifactPath", "bestWeightPath", "checkpointPath", "storagePath");
+        Object uploaded = data.get("outputUploaded");
+        if ((storagePath == null || storagePath.isBlank()) && Boolean.TRUE.equals(uploaded)) {
+            storagePath = "training/" + msg.taskId() + "/output/best.pt";
+        }
+        if (storagePath == null || storagePath.isBlank()) return;
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("storagePath", storagePath);
+        extra.put("outputPath", storagePath);
+        extra.put("artifactName", "best.pt");
+        Object step = data.get("step");
+        if (step != null) extra.put("step", step);
+        Object result = data.get("result");
+        if (result != null) extra.put("result", result);
+        m.setExtra(extra);
+    }
+
+    private String firstText(java.util.Map<String, Object> data, String... keys) {
+        if (data == null) return null;
+        for (String key : keys) {
+            Object value = data.get(key);
+            if (value != null) {
+                String text = String.valueOf(value);
+                if (!text.isBlank()) return text;
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

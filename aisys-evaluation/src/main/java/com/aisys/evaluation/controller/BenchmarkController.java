@@ -4,6 +4,7 @@ import com.aisys.common.core.response.ApiResponse;
 import com.aisys.common.core.response.PageResult;
 import com.aisys.common.log.annotation.AuditLog;
 import com.aisys.evaluation.dto.BenchmarkDtos.BenchmarkCreateRequest;
+import com.aisys.evaluation.dto.BenchmarkDtos.BenchmarkMetricsResponse;
 import com.aisys.evaluation.dto.BenchmarkDtos.BenchmarkResponse;
 import com.aisys.evaluation.dto.BenchmarkDtos.BenchmarkUpdateRequest;
 import com.aisys.evaluation.service.BenchmarkService;
@@ -64,5 +65,11 @@ public class BenchmarkController {
     public ApiResponse<Void> delete(@PathVariable("id") Long id) {
         benchmarkService.delete(id);
         return ApiResponse.success();
+    }
+
+    /** 获取评测集指标配置 GET /api/v1/benchmarks/{id}/metrics */
+    @GetMapping("/{id}/metrics")
+    public ApiResponse<BenchmarkMetricsResponse> getMetrics(@PathVariable("id") Long id) {
+        return ApiResponse.success(benchmarkService.getMetrics(id));
     }
 }

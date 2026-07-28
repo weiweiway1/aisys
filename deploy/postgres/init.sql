@@ -43,3 +43,9 @@ END $$;
 
 -- 提示
 \echo 'aisys 数据库初始化完成：角色 aisys_app(RLS) / aisys_platform_admin(BYPASSRLS) 已就绪'
+
+-- ============================================================================
+-- 注意：业务表由各服务的 Flyway 迁移自动创建（classpath:db/migration）
+--   - V500001: evaluation_task / evaluation_subtask / evaluation_result / benchmark 等
+--   - V500002: evaluation_report（LLM 生成的评测分析报告）
+-- ============================================================================

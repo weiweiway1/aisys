@@ -65,6 +65,9 @@ aisys:
     poll-interval-ms: ${OUTBOX_POLL_MS:3000}
   training:
     metrics-downsample-seconds: ${METRICS_DOWNSAMPLE:15}
+    # 默认 Docker 镜像名（当请求未提供 image 且 containerSpec.imageName 为空时使用）
+    # 留空则要求必须显式指定镜像（推荐，避免误用不存在的镜像）
+    default-image: ${TRAINING_DEFAULT_IMAGE:}
 
 management:
   endpoints:

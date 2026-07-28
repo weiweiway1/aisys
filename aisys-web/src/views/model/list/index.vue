@@ -249,13 +249,15 @@ const form = reactive<{
   type: string;
   framework: string;
   description: string;
-  version: string;       // 新增：版本号
+  version: string;       // 版本号
+  imageName: string;     // Docker 镜像名（docker run 用）
 }>({
   name: "",
   type: "image_classification",
   framework: "",
   description: "",
-  version: ""            // 默认 v1.0
+  version: "",
+  imageName: ""
 });
 const selectedFile = ref<File | null>(null);
 
@@ -263,7 +265,8 @@ const rules: FormRules = {
   name: [{ required: true, message: "请输入模型名称", trigger: "blur" }],
   type: [{ required: true, message: "请选择模型类型", trigger: "change" }],
   framework: [{ required: true, message: "请输入框架", trigger: "blur" }],
-  version: [{ required: true, message: "请输入版本号", trigger: "blur" }]
+  version: [{ required: true, message: "请输入版本号", trigger: "blur" }],
+  imageName: [{ required: true, message: "请输入 Docker 镜像名称（用于训练/评测启动容器）", trigger: "blur" }]
 };
 
 // 模型类型 = 任务类型，与数据集 taskType 一致（图像分类/时序分类/目标检测）
@@ -308,15 +311,13 @@ const fixPresignUrl = (url: string): { fixed: string; changed: boolean; original
     const u = new URL(url);
     const original = url;
     let changed = false;
-    // 如果 hostname 不是 IP/localhost 且端口是 8333，做替换
-    if (u.port === "8333" && !/^(localhost|127\.0\.0\.1|\d{1,3}(\.\d{1,3}){3})$/.test(u.hostname)) {
-      const pageOrigin = window.location.origin;
-      const pageHost = new URL(pageOrigin).hostname;
-      diag(`fixPresignUrl: 替换 hostname "${u.hostname}" → "${pageHost}"`);
-      u.hostname = pageHost;
-      changed = true;
+    if (u.port === "8333" || u.hostname === "seaweedfs") {
+      const pathAndQuery = u.pathname + u.search;
+      const fixed = `${window.location.origin}/s3-upload${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+      diag(`fixPresignUrl: S3 URL → 同源反代 ${fixed.substring(0, 100)}...`);
+      return { fixed, changed: true, original };
     }
-    return { fixed: u.toString(), changed, original };
+    return { fixed: url, changed: false, original: url };
   } catch (e) {
     diag(`fixPresignUrl 解析失败`, e);
     return { fixed: url, changed: false, original: url };
@@ -398,6 +399,7 @@ const openCreate = () => {
   form.framework = "";
   form.description = "";
   form.version = "v1.0";
+  form.imageName = "";
   selectedFile.value = null;
   uploadProgress.value = 0;
   uploadStatusText.value = "";
@@ -480,8 +482,9 @@ const handleCreate = async () => {
       diag(`步骤1 ✅ 创建模型 modelId=${modelId}`);
       uploadStatusText.value = "创建版本...";
 
-      // 2. 创建版本（status=creating）
-      const verRes: any = await createModelVersion(modelId, { version: form.version.trim() });
+      // 2. 创建版本（config.imageName 是 docker run 必需的镜像名）
+      const config = form.imageName.trim() ? { imageName: form.imageName.trim() } : undefined;
+      const verRes: any = await createModelVersion(modelId, { version: form.version.trim(), config });
       if (!verRes || verRes.code !== 0) throw new Error(verRes?.message || "创建版本失败");
       const versionId = verRes.data.id;
       diag(`步骤2 ✅ 创建版本 versionId=${versionId}`);
@@ -690,6 +693,10 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="版本号" prop="version">
           <el-input v-model="form.version" placeholder="例如 v1.0, v2.0-beta" />
+        </el-form-item>
+        <el-form-item label="镜像名称" prop="imageName">
+          <el-input v-model="form.imageName" placeholder="例如 aisys/ultralytics-yolo-cls:v1（docker run 使用的镜像名）" />
+          <div style="font-size:12px;color:#909399;line-height:1.4;margin-top:4px">Docker 容器镜像名，用于训练/评测时启动容器。必须与构建镜像时的 tag 一致。</div>
         </el-form-item>
         <el-form-item label="框架" prop="framework">
           <el-input v-model="form.framework" placeholder="如 PyTorch / TensorFlow / ONNX" />

@@ -26,6 +26,7 @@ import com.aisys.evaluation.mapper.EvaluationSubtaskMapper;
 import com.aisys.evaluation.mapper.EvaluationTaskMapper;
 import com.aisys.evaluation.mq.EvaluationCommandMessage;
 import com.aisys.evaluation.mq.TaskStatusMessage;
+import com.aisys.evaluation.service.EvaluationReportService;
 import com.aisys.evaluation.service.EvaluationTaskService;
 import com.aisys.evaluation.util.EvalJson;
 import org.slf4j.Logger;
@@ -39,6 +40,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 评测任务服务实现（DDD 5.6）。
@@ -63,6 +66,7 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
     private final EventPublisher eventPublisher;
     private final com.aisys.evaluation.client.ModelClient modelClient;
     private final com.aisys.evaluation.client.DatasetClient datasetClient;
+    private final EvaluationReportService reportService;   // 评测报告服务（异步生成）
 
     public EvaluationTaskServiceImpl(EvaluationTaskMapper taskMapper,
                                      EvaluationSubtaskMapper subtaskMapper,
@@ -70,7 +74,8 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
                                      BenchmarkMapper benchmarkMapper,
                                      EventPublisher eventPublisher,
                                      com.aisys.evaluation.client.ModelClient modelClient,
-                                     com.aisys.evaluation.client.DatasetClient datasetClient) {
+                                     com.aisys.evaluation.client.DatasetClient datasetClient,
+                                     EvaluationReportService reportService) {
         this.taskMapper = taskMapper;
         this.subtaskMapper = subtaskMapper;
         this.resultMapper = resultMapper;
@@ -78,6 +83,7 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
         this.eventPublisher = eventPublisher;
         this.modelClient = modelClient;
         this.datasetClient = datasetClient;
+        this.reportService = reportService;
     }
 
     // ====================== 创建（拆分子任务）======================
@@ -159,6 +165,8 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
         }
         // 清理评测结果（evaluation_result 无 FK 级联，否则成孤儿污染排行榜/对比）
         resultMapper.deleteByTaskId(id, tenantId);
+        // 清理评测报告
+        try { reportService.deleteReport(id); } catch (Exception ignored) {}
         // 子任务由 ON DELETE CASCADE 级联删除
         taskMapper.deleteByIdAndTenant(id, tenantId);
     }
@@ -236,6 +244,8 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
         List<EvaluationSubtask> subtasks = subtaskMapper.selectByParentTaskId(id, tenantId);
         // 清理上一次运行的评测结果（否则 writeResultIfAbsent 命中旧结果，新分数被丢弃）
         resultMapper.deleteByTaskId(id, tenantId);
+        // 清理上一次的报告（否则用户看到过期报告且不会重新生成）
+        try { reportService.deleteReport(id); } catch (Exception ignored) {}
         // 重置所有子任务为 pending
         for (EvaluationSubtask st : subtasks) {
             subtaskMapper.updateStatus(st.getId(), tenantId, EvaluationConstants.STATUS_PENDING, null, null, null, null);
@@ -357,6 +367,17 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
         taskMapper.updateStatus(parentTaskId, tenantId, finalStatus, 100, null, Instant.now());
         log.info("[aggregateParent] 父任务聚合完成 taskId={} status={} completed={} failed={}",
                 parentTaskId, finalStatus, completed, failed);
+
+        // ★ 评测完成 → 异步触发 LLM 报告生成（不阻塞主流程）
+        if (EvaluationConstants.STATUS_COMPLETED.equals(finalStatus)
+                || EvaluationConstants.STATUS_COMPLETED_WITH_ERRORS.equals(finalStatus)) {
+            try {
+                reportService.generateReportAsync(parentTaskId, false, tenantId);
+            } catch (Exception e) {
+                // 报告生成失败不影响评测流程
+                log.warn("[aggregateParent] 触发报告生成失败（非致命）taskId={} : {}", parentTaskId, e.getMessage());
+            }
+        }
     }
 
     // ====================== 结果 / 样本 / 排行榜 / 对比 ======================
@@ -402,17 +423,108 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
         String metric = (sortBy == null || sortBy.isBlank())
                 ? EvaluationConstants.DEFAULT_SORT_METRIC : sortBy;
         List<EvaluationResult> rs = resultMapper.selectByBenchmark(benchmarkId, tenantId);
+
+        // ★ 当未指定排序指标（或为空）时，从数据中自动推断首个可用的数值型指标
+        if (metric.isEmpty() && !rs.isEmpty()) {
+            metric = detectDefaultMetric(rs);
+        }
+
+        // ★ 批量获取模型名称（通过 Feign 调用 model 服务）
+        Map<Long, Map<String, Object>> modelInfoMap = batchFetchModelInfo(rs);
+
+        final String finalMetric = metric;
         List<LeaderboardEntry> entries = rs.stream().map(r -> {
             Map<String, Object> overall = EvalJson.toMap(r.getOverallScores());
-            Double score = extractMetric(overall, metric);
-            return new LeaderboardEntry(r.getId(), r.getModelVersionId(), r.getBenchmarkId(),
-                    r.getSampleCount(), score, overall, r.getCompletedAt());
+            Double score = extractMetric(overall, finalMetric);
+
+            // 从批量查询结果中取模型名称
+            Map<String, Object> minfo = modelInfoMap.get(r.getModelVersionId());
+            String modelName = extractModelName(minfo);
+            String modelVer = extractModelVersion(minfo);
+
+            return new LeaderboardEntry(r.getId(), r.getModelVersionId(), modelName, modelVer,
+                    r.getBenchmarkId(), r.getSampleCount(), score, overall, r.getCompletedAt());
         }).toList();
+
         // 按指标降序（null 排末尾）
         List<LeaderboardEntry> sorted = new ArrayList<>(entries);
         sorted.sort(Comparator.comparing(LeaderboardEntry::sortScore,
                 Comparator.nullsLast(Comparator.reverseOrder())));
         return sorted;
+    }
+
+    /**
+     * 批量获取模型版本信息（避免 N+1 Feign 调用）。
+     * 返回 {modelVersionId → {name, version, modelName, ...}} 的映射。
+     */
+    private Map<Long, Map<String, Object>> batchFetchModelInfo(List<EvaluationResult> results) {
+        Map<Long, Map<String, Object>> map = new java.util.HashMap<>();
+        if (results == null || results.isEmpty()) return map;
+
+        // 去重收集所有 modelVersionId
+        Set<Long> ids = results.stream()
+                .map(EvaluationResult::getModelVersionId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+
+        for (Long vid : ids) {
+            try {
+                var resp = modelClient.getVersionById(vid);
+                if (resp != null && resp.isSuccess() && resp.data() != null) {
+                    map.put(vid, resp.data());
+                }
+            } catch (Exception e) {
+                log.warn("[leaderboard] 获取模型版本信息失败 versionId={} : {}", vid, e.getMessage());
+            }
+        }
+        return map;
+    }
+
+    /** 从 model 服务返回的 Map 中提取模型名称。优先级：modelName > name > model_name > null */
+    private static String extractModelName(Map<String, Object> info) {
+        if (info == null) return null;
+        for (String key : new String[]{"modelName", "name", "model_name"}) {
+            Object v = info.get(key);
+            if (v instanceof String s && !s.isBlank()) return s.trim();
+        }
+        return null;
+    }
+
+    /** 从 model 服务返回的 Map 中提取版本号。优先级：version > versionTag > ver > null */
+    private static String extractModelVersion(Map<String, Object> info) {
+        if (info == null) return null;
+        for (String key : new String[]{"version", "versionTag", "ver"}) {
+            Object v = info.get(key);
+            if (v != null) return String.valueOf(v).trim();
+        }
+        return null;
+    }
+
+    /**
+     * 从所有评测结果中自动推断默认排序指标。
+     * 优先级：top1_acc > accuracy > mAP50 > 首个数值型字段。
+     */
+    private String detectDefaultMetric(List<EvaluationResult> results) {
+        // 优先使用分类/检测通用的高优指标
+        java.util.List<String> preferred = java.util.List.of(
+                "top1_acc", "accuracy", "mAP50", "mAP50-95",
+                "precision", "recall", "top5_acc");
+        for (String p : preferred) {
+            for (EvaluationResult r : results) {
+                Map<String, Object> m = EvalJson.toMap(r.getOverallScores());
+                if (m != null && m.get(p) instanceof Number) return p;
+            }
+        }
+        // 兜底：取任意数值型字段的第一个 key
+        for (EvaluationResult r : results) {
+            Map<String, Object> m = EvalJson.toMap(r.getOverallScores());
+            if (m != null) {
+                for (java.util.Map.Entry<String, Object> e : m.entrySet()) {
+                    if (e.getValue() instanceof Number) return e.getKey();
+                }
+            }
+        }
+        return "top1_acc";  // 终极兜底
     }
 
     @Override
@@ -451,12 +563,21 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
     }
 
     private EvaluationTaskResponse toResponse(EvaluationTask t, List<EvaluationSubtask> subtasks) {
+        // 查询评测集名称
+        String benchmarkName = null;
+        if (t.getBenchmarkId() != null) {
+            Benchmark bm = benchmarkMapper.selectByIdAndTenant(t.getBenchmarkId(), t.getTenantId());
+            if (bm != null) {
+                benchmarkName = bm.getName();
+            }
+        }
+
         List<SubtaskSummary> summaries = subtasks.stream()
                 .map(s -> new SubtaskSummary(s.getId(), s.getModelVersionId(), s.getStatus(),
                         s.getAssignedNodeId(), s.getErrorMessage(), s.getStartedAt(), s.getCompletedAt()))
                 .toList();
         return new EvaluationTaskResponse(
-                t.getId(), t.getProjectId(), t.getBenchmarkId(), t.getName(),
+                t.getId(), t.getProjectId(), t.getBenchmarkId(), benchmarkName, t.getName(),
                 EvalJson.toLongList(t.getModelVersionIds()),
                 t.getStatus(), t.getProgress(), t.getConfig(),
                 t.getStartedAt(), t.getCompletedAt(), t.getCreatedBy(),
@@ -477,13 +598,14 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
         if (overall == null) return null;
         Object v = overall.get(metric);
         if (v != null) {
+            // ★ 跳过数组/集合/嵌套对象（如 confusion_matrix 是二维数组，不能作为排序分）
             if (v instanceof Number n) return n.doubleValue();
+            if (v instanceof java.util.Collection || v.getClass().isArray()) return null;
             try { return Double.parseDouble(String.valueOf(v)); } catch (NumberFormatException e) { return null; }
         }
-        // 兜底：指定指标缺失时（如默认 accuracy 但容器只产 mAP50），取第一个可用数值，避免排行榜 sortScore 恒为 null。
+        // 兜底：指定指标缺失时，取第一个可用的**纯数值**字段（跳过数组/嵌套对象等非数值）
         for (Object vv : overall.values()) {
             if (vv instanceof Number n) return n.doubleValue();
-            try { return Double.parseDouble(String.valueOf(vv)); } catch (NumberFormatException e) { continue; }
         }
         return null;
     }
@@ -544,7 +666,11 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
                     if (cfg instanceof Map<?, ?> cm && cm.get("imageName") != null) {
                         msg.setImageName(String.valueOf(cm.get("imageName")));
                     }
+                    // 改进：同时检查 storagePath 和 imageName（至少需要 storagePath，但 imageName 为空时警告）
                     resolved = msg.getImageTarRelPath() != null;
+                    if (resolved && (msg.getImageName() == null || msg.getImageName().isBlank())) {
+                        log.warn("[start] 模型版本缺少 imageName modelVersionId={}（Agent 将尝试从 imageTar 解析或使用默认行为）", modelVersionId);
+                    }
                 }
             } catch (Exception e) {
                 throw new BusinessException(EvaluationErrorCode.EVALUATION_INTERNAL_ERROR,
@@ -578,5 +704,61 @@ public class EvaluationTaskServiceImpl implements EvaluationTaskService {
                         "数据集版本不可用 datasetVersionId=" + dvid);
             }
         }
+    }
+
+    // ====================== 自动评测（模型发布事件触发） ======================
+
+    @Override
+    @Transactional
+    public void autoCreateAndStart(Long modelVersionId) {
+        // 使用 system 用户上下文（MQ 消费线程无 HTTP session）
+        Long tenantId = UserContext.getTenantId();
+        if (tenantId == null) {
+            tenantId = 1L; // 默认租户（生产环境应从消息体或配置读取）
+            log.warn("[AutoEval] 无法获取租户上下文，使用默认 tenantId={}", tenantId);
+        }
+
+        // 1. 查找活跃 benchmark
+        Benchmark benchmark = benchmarkMapper.selectActiveByTenant(tenantId);
+        if (benchmark == null) {
+            log.info("[AutoEval] 无活跃 benchmark，跳过自动评测 modelVersionId={}", modelVersionId);
+            return;
+        }
+
+        // 2. 创建评测任务
+        String taskName = String.format("自动评测-%s-v%s",
+                modelNameForVersion(modelVersionId), Instant.now().getEpochSecond());
+        EvaluationTaskCreateRequest request = new EvaluationTaskCreateRequest(
+                null,   // projectId — 自动评测不需要项目归属
+                benchmark.getId(),
+                taskName,
+                List.of(modelVersionId),
+                null    // config
+        );
+
+        EvaluationTaskResponse task = create(request);
+        log.info("[AutoEval] 已创建评测任务 taskId={} modelVersionId={} benchmarkId={}",
+                task.id(), modelVersionId, benchmark.getId());
+
+        // 3. 立即启动
+        start(task.id());
+        log.info("[AutoEval] 已启动评测任务 taskId={} modelVersionId={}", task.id(), modelVersionId);
+    }
+
+    /** 获取模型版本名称（用于自动生成任务名），失败时返回 ID */
+    private String modelNameForVersion(Long modelVersionId) {
+        try {
+            var resp = modelClient.getVersionById(modelVersionId);
+            if (resp != null && resp.isSuccess() && resp.data() != null) {
+                Map<String, Object> v = resp.data();
+                String name = (String) v.get("modelName");
+                if (name != null) return name;
+                name = (String) v.get("name");
+                if (name != null) return name;
+            }
+        } catch (Exception e) {
+            log.debug("[AutoEval] 获取模型名称失败 versionId={}: {}", modelVersionId, e.getMessage());
+        }
+        return "v" + modelVersionId;
     }
 }

@@ -42,4 +42,10 @@ public interface EvaluationTaskService {
      * 消费 task.status 后处理子任务状态、聚合父任务、写结果。
      */
     void handleSubtaskStatus(TaskStatusMessage message);
+
+    /**
+     * 模型版本发布后自动创建并启动评测任务（事件驱动）。
+     * 使用租户下第一个 active benchmark；无活跃 benchmark 时跳过。
+     */
+    void autoCreateAndStart(Long modelVersionId);
 }

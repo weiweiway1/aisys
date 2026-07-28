@@ -27,6 +27,7 @@ public final class ResourceMessages {
         private Map<String, Object> categoryScores;
         private Integer sampleCount;
         private String detailPath;
+        private Map<String, Object> extra;
 
         @Override public String messageType() { return "TASK_STATUS"; }
         public String getTaskType() { return taskType; }
@@ -53,6 +54,8 @@ public final class ResourceMessages {
         public void setSampleCount(Integer sampleCount) { this.sampleCount = sampleCount; }
         public String getDetailPath() { return detailPath; }
         public void setDetailPath(String detailPath) { this.detailPath = detailPath; }
+        public Map<String, Object> getExtra() { return extra; }
+        public void setExtra(Map<String, Object> extra) { this.extra = extra; }
     }
 
     /** 任务日志（task.log）。level: INFO/WARN/ERROR */

@@ -7,17 +7,23 @@ import {
   getEvaluationTaskList,
   createEvaluationTask,
   startEvaluationTask,
-  getBenchmarkList
+  getBenchmarkList,
+  getEvaluationReport,
+  rerunEvaluationTask
 } from "@/api/evaluation";
 import { getModelList, getModelVersions } from "@/api/model";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import dayjs from "dayjs";
 import AddFill from "~icons/ri/add-circle-line";
 import Refresh from "~icons/ep/refresh";
 import VideoPlay from "~icons/ep/video-play";
+import Document from "~icons/ri/file-text-line";
+import { useRouter } from "vue-router";
 
 defineOptions({
   name: "EvaluationTasks" });
 
+const router = useRouter();
 const loading = ref(false);
 const dataList = ref<any[]>([]);
 const total = ref(0);
@@ -51,6 +57,20 @@ const statusMap: Record<string, { type: string; label: string }> = {
 const statusOf = (s?: string) =>
   (s && statusMap[s.toUpperCase()]) || { type: "info", label: s || "-" };
 
+/** 判断任务是否处于终态（可查看报告 / 可重新测试） */
+const isTerminalStatus = (s?: string): boolean => {
+  if (!s) return false;
+  const upper = s.toUpperCase();
+  return ["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "CANCELED", "CANCELLED", "STOPPED"].includes(upper);
+};
+
+/** 判断任务是否可以查看报告（已完成类状态） */
+const canViewReport = (s?: string): boolean => {
+  if (!s) return false;
+  const upper = s.toUpperCase();
+  return ["COMPLETED", "COMPLETED_WITH_ERRORS"].includes(upper);
+};
+
 const startLoading = ref<number | null>(null);
 
 const columns: TableColumnList = [
@@ -73,10 +93,13 @@ const columns: TableColumnList = [
     label: "模型版本",
     minWidth: 160,
     showOverflowTooltip: true,
-    cellRenderer: ({ row }) =>
-      Array.isArray(row.modelVersionIds) && row.modelVersionIds.length
-        ? row.modelVersionIds.map((id: number) => `#${id}`).join(", ")
-        : "-"
+    cellRenderer: ({ row }) => {
+      if (!Array.isArray(row.modelVersionIds) || !row.modelVersionIds.length) return "-";
+      const map = versionLabelMap();
+      return row.modelVersionIds
+        .map((id: number) => map.get(id) || `#${id}`)
+        .join(", ");
+    }
   },
   {
     label: "状态",
@@ -96,29 +119,46 @@ const columns: TableColumnList = [
     label: "创建时间",
     prop: "createdAt",
     width: 180,
-    align: "center"
+    align: "center",
+    formatter: ({ createdAt }: any) =>
+      createdAt ? dayjs(createdAt).format("YYYY-MM-DD HH:mm:ss") : "-"
   },
   {
     label: "操作",
-    width: 150,
+    width: 240,
     align: "center",
     fixed: "right",
     cellRenderer: ({ row }) =>
-      h(
-        ElButton,
-        {
-          link: true,
-          type: "primary",
-          loading: startLoading.value === row.id,
-          disabled:
-            row.status === "RUNNING" ||
-            row.status === "PENDING" ||
-            row.status === "QUEUED",
-          icon: useRenderIcon(VideoPlay),
-          onClick: () => handleStart(row)
-        },
-        () => "启动"
-      )
+      h("div", { style: "display:flex;gap:4px;justify-content:center;flex-wrap:wrap" }, [
+        // 查看报告（已完成/部分完成 才显示）
+        canViewReport(row.status)
+          ? h(ElButton, {
+              link: true,
+              type: "primary",
+              size: "small",
+              icon: useRenderIcon(Document),
+              onClick: () => router.push(`/evaluation/report/${row.id}`)
+            }, () => "报告")
+          : null,
+        // 启动 / 重新测试 按钮
+        h(
+          ElButton,
+          {
+            link: true,
+            type: isTerminalStatus(row.status) ? "warning" : "primary",
+            size: "small",
+            loading: startLoading.value === row.id,
+            disabled:
+              row.status?.toUpperCase() === "RUNNING" ||
+              row.status?.toUpperCase() === "PENDING" ||
+              row.status?.toUpperCase() === "QUEUED",
+            icon: useRenderIcon(VideoPlay),
+            onClick: () => handleStart(row)
+          }, () =>
+            isTerminalStatus(row.status) ? "重测" :
+            row.status?.toUpperCase() === "RUNNING" ? "运行中" : "启动"
+          )
+      ])
   }
 ];
 
@@ -160,6 +200,15 @@ const onCurrentChange = (page: number) => {
 const benchmarkOptions = ref<Array<{ id: number; label: string }>>([]);
 const modelVersionOptions = ref<Array<{ id: number; label: string }>>([]);
 
+/** 版本 ID → "模型名-版本号" 显示名映射（用于列表渲染） */
+const versionLabelMap = () => {
+  const map = new Map<number, string>();
+  for (const opt of modelVersionOptions.value) {
+    map.set(opt.id, opt.label);
+  }
+  return map;
+};
+
 async function loadBenchmarks() {
   try {
     const res: any = await getBenchmarkList({ size: 100 });
@@ -183,7 +232,7 @@ async function loadModelVersions() {
       const versions = vr?.data?.items ?? (Array.isArray(vr?.data) ? vr.data : []);
       for (const v of versions) {
         if (v.status === "ready") {
-          flat.push({ id: v.id, label: `${m.name} @ ${v.version}` });
+          flat.push({ id: v.id, label: `${m.name}-${v.version}` });
         }
       }
     }
@@ -257,21 +306,28 @@ const handleSubmit = async (formEl: FormInstance | undefined) => {
   });
 };
 
-/* ---------------- 启动任务 ---------------- */
+/* ---------------- 启动 / 重新测试 任务 ---------------- */
 const handleStart = (row: any) => {
   if (!row?.id) return;
   startLoading.value = row.id;
-  startEvaluationTask(row.id)
+
+  // 终态任务（已完成/失败/取消/停止）→ 调 rerun；其他 → 调 start
+  const apiCall = isTerminalStatus(row.status)
+    ? rerunEvaluationTask(row.id)
+    : startEvaluationTask(row.id);
+  const actionName = isTerminalStatus(row.status) ? "重新测试" : "启动";
+
+  apiCall
     .then(res => {
       if (res?.code === 0) {
-        ElMessage.success("评测任务已启动");
+        ElMessage.success(`评测任务${actionName}成功`);
         getList();
       } else {
-        ElMessage.error(res?.message ?? "启动评测任务失败");
+        ElMessage.error(res?.message ?? `评测任务${actionName}失败`);
       }
     })
     .catch((e: any) => {
-      ElMessage.error(e?.message ?? "启动评测任务失败");
+      ElMessage.error(e?.message ?? `评测任务${actionName}失败`);
     })
     .finally(() => {
       startLoading.value = null;
@@ -280,6 +336,8 @@ const handleStart = (row: any) => {
 
 onMounted(() => {
   getList();
+  // 预加载下拉数据（用于表格列中的名称渲染）
+  Promise.all([loadBenchmarks(), loadModelVersions()]);
 });
 </script>
 

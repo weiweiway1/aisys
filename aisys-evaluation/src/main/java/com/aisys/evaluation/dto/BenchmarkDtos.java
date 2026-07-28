@@ -47,4 +47,13 @@ public final class BenchmarkDtos {
             Instant createdAt,
             Instant updatedAt
     ) {}
+
+    /** 单个指标条目 */
+    public record MetricItem(String value, String label) {}
+
+    /** 评测集指标配置响应（前端 leaderboard 排序下拉用） */
+    public record BenchmarkMetricsResponse(
+            List<MetricItem> supportedMetrics,
+            String defaultSortMetric
+    ) {}
 }

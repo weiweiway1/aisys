@@ -26,6 +26,7 @@ public final class EvaluationTaskDtos {
             Long id,
             Long projectId,
             Long benchmarkId,
+            String benchmarkName,
             String name,
             List<Long> modelVersionIds,
             String status,

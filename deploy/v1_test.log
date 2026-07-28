@@ -1,0 +1,114 @@
+{"type": "log", "level": "INFO", "message": "AISYS YOLOv8-CLS 容器启动, task=eval"}
+{"type": "log", "level": "INFO", "message": "dataset=/data/dataset output=/output"}
+{"type": "log", "level": "INFO", "message": "hyperparams={\"imgsz\":64,\"batch_size\":4} format=imagenet"}
+{"type": "status", "status": "running", "progress": 1}
+WARNING ⚠️ user config directory '/root/.config/Ultralytics' is not writable, using '/tmp/Ultralytics'. Set YOLO_CONFIG_DIR to override.
+Creating new Ultralytics Settings v0.0.6 file ✅ 
+View Ultralytics Settings with 'yolo settings' or at '/tmp/Ultralytics/settings.json'
+Update Settings with 'yolo settings key=value', i.e. 'yolo settings runs_dir=path/to/dir'. For help see https://docs.ultralytics.com/quickstart/#ultralytics-settings.
+{"type": "log", "level": "WARN", "message": "挂载点无有效 ImageFolder 数据 (/data/dataset)，使用合成数据兜底"}
+{"type": "log", "level": "INFO", "message": "使用容器内嵌已训练权重: /opt/aisys/weights/best.pt"}
+{"type": "log", "level": "INFO", "message": "开始评测: weights=/opt/aisys/weights/best.pt imgsz=64"}
+{"type": "log", "level": "INFO", "message": "数据集: /tmp/aisys_synthetic_dataset"}
+Ultralytics 8.4.96 🚀 Python-3.11.15 torch-2.13.0+cpu CPU (11th Gen Intel Core i5-11260H @ 2.60GHz)
+YOLOv8n-cls summary (fused): 30 layers, 1,445,128 parameters, 0 gradients, 3.3 GFLOPs
+WARNING ⚠️ Dataset 'split=train' not found at /tmp/aisys_synthetic_dataset/train
+Found 24 images in subdirectories. Attempting to split...
+Splitting /tmp/aisys_synthetic_dataset (8 classes, 24 images) into 80% train, 20% val...
+Split complete in /tmp/aisys_synthetic_dataset_split ✅
+[34m[1mtrain:[0m /tmp/aisys_synthetic_dataset_split/train... found 16 images in 8 classes ✅ 
+[34m[1mval:[0m /tmp/aisys_synthetic_dataset_split/val... found 8 images in 8 classes ✅ 
+[34m[1mtest:[0m None...
+[34m[1mval: [0mFast image access ✅ (ping: 0.0±0.0 ms, read: 661.2±213.4 MB/s, size: 12.1 KB)
+[K[34m[1mval: [0mScanning /tmp/aisys_synthetic_dataset_split/val... 8 images, 0 corrupt: 100% ━━━━━━━━━━━━ 8/8 2.1Kit/s 0.0s
+[34m[1mval: [0mNew cache created: /tmp/aisys_synthetic_dataset_split/val.cache
+[K               classes   top1_acc   top5_acc: 50% ━━━━━━────── 1/2 1.8s/it 0.5s<1.8s[K               classes   top1_acc   top5_acc: 100% ━━━━━━━━━━━━ 2/2 3.6it/s 0.5s
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 21152 (\N{CJK UNIFIED IDEOGRAPH-52A0}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 36895 (\N{CJK UNIFIED IDEOGRAPH-901F}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 21457 (\N{CJK UNIFIED IDEOGRAPH-53D1}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 21160 (\N{CJK UNIFIED IDEOGRAPH-52A8}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 26426 (\N{CJK UNIFIED IDEOGRAPH-673A}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 22833 (\N{CJK UNIFIED IDEOGRAPH-5931}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 28779 (\N{CJK UNIFIED IDEOGRAPH-706B}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 27963 (\N{CJK UNIFIED IDEOGRAPH-6D3B}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 22622 (\N{CJK UNIFIED IDEOGRAPH-585E}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 25970 (\N{CJK UNIFIED IDEOGRAPH-6572}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 32568 (\N{CJK UNIFIED IDEOGRAPH-7F38}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 27491 (\N{CJK UNIFIED IDEOGRAPH-6B63}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 24120 (\N{CJK UNIFIED IDEOGRAPH-5E38}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 25968 (\N{CJK UNIFIED IDEOGRAPH-6570}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 25454 (\N{CJK UNIFIED IDEOGRAPH-636E}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 27668 (\N{CJK UNIFIED IDEOGRAPH-6C14}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 38376 (\N{CJK UNIFIED IDEOGRAPH-95E8}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 38388 (\N{CJK UNIFIED IDEOGRAPH-95F4}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 38553 (\N{CJK UNIFIED IDEOGRAPH-9699}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 24322 (\N{CJK UNIFIED IDEOGRAPH-5F02}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 24608 (\N{CJK UNIFIED IDEOGRAPH-6020}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 21152 (\N{CJK UNIFIED IDEOGRAPH-52A0}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 36895 (\N{CJK UNIFIED IDEOGRAPH-901F}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 21457 (\N{CJK UNIFIED IDEOGRAPH-53D1}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 21160 (\N{CJK UNIFIED IDEOGRAPH-52A8}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 26426 (\N{CJK UNIFIED IDEOGRAPH-673A}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 22833 (\N{CJK UNIFIED IDEOGRAPH-5931}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 28779 (\N{CJK UNIFIED IDEOGRAPH-706B}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 27963 (\N{CJK UNIFIED IDEOGRAPH-6D3B}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 22622 (\N{CJK UNIFIED IDEOGRAPH-585E}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 25970 (\N{CJK UNIFIED IDEOGRAPH-6572}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 32568 (\N{CJK UNIFIED IDEOGRAPH-7F38}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 27491 (\N{CJK UNIFIED IDEOGRAPH-6B63}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 24120 (\N{CJK UNIFIED IDEOGRAPH-5E38}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 25968 (\N{CJK UNIFIED IDEOGRAPH-6570}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 25454 (\N{CJK UNIFIED IDEOGRAPH-636E}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 27668 (\N{CJK UNIFIED IDEOGRAPH-6C14}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 38376 (\N{CJK UNIFIED IDEOGRAPH-95E8}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 38388 (\N{CJK UNIFIED IDEOGRAPH-95F4}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 38553 (\N{CJK UNIFIED IDEOGRAPH-9699}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 24322 (\N{CJK UNIFIED IDEOGRAPH-5F02}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+/usr/local/lib/python3.11/site-packages/ultralytics/utils/metrics.py:606: UserWarning: Glyph 24608 (\N{CJK UNIFIED IDEOGRAPH-6020}) missing from font(s) DejaVu Sans.
+  fig.savefig(plot_fname, dpi=250)
+                   all      0.125       0.75
+Speed: 0.0ms preprocess, 63.9ms inference, 0.0ms loss, 0.0ms postprocess per image
+Results saved to [1m/output/eval/eval_run[0m
+{"type": "log", "level": "ERROR", "message": "任务失败: 'ConfusionMatrix' object has no attribute 'tolist'\nTraceback (most recent call last):\n  File \"/opt/aisys/run.py\", line 384, in main\n    result = evaluate()\n             ^^^^^^^^^^\n  File \"/opt/aisys/run.py\", line 320, in evaluate\n    eval_metrics[\"confusion_matrix\"] = cm.tolist()\n                                       ^^^^^^^^^\nAttributeError: 'ConfusionMatrix' object has no attribute 'tolist'\n"}
+{"type": "result", "status": "failed", "progress": 100, "error": "'ConfusionMatrix' object has no attribute 'tolist'"}

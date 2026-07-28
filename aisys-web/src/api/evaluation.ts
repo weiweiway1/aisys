@@ -43,15 +43,17 @@ export interface EvaluationTask {
   updatedAt?: string;
 }
 
-/** 排行榜条目（overallScores 为动态字段，如 accuracy / precision 等） */
+/** 排行榜条目（overallScores 为动态字段，如 top1_acc / mAP50 / precision 等） */
 export interface LeaderboardEntry {
+  resultId?: number;
   modelVersionId?: number;
   modelName?: string;
   modelVersion?: string;
-  rank?: number;
+  benchmarkId?: number;
+  sampleCount?: number;
+  sortScore?: number;
   overallScores?: Record<string, number>;
-  totalScore?: number;
-  accuracy?: number;
+  completedAt?: string;
 }
 
 /** 评测结果条目 */
@@ -62,10 +64,10 @@ export interface EvaluationResultItem {
   benchmarkId?: number;
   benchmarkName?: string;
   status?: string;
-  totalQuestions?: number;
-  correctCount?: number;
-  accuracy?: number;
+  sampleCount?: number;
   overallScores?: Record<string, number>;
+  categoryScores?: Record<string, number>;
+  completedAt?: string;
 }
 
 /* ------------------------------ 评测集 ------------------------------ */
@@ -119,6 +121,14 @@ export const startEvaluationTask = (id: number) => {
   );
 };
 
+/** 重新测试（已完成/失败的任务）POST /api/v1/evaluation/tasks/{id}/rerun */
+export const rerunEvaluationTask = (id: number) => {
+  return http.request<Result>(
+    "post",
+    `/api/v1/evaluation/tasks/${id}/rerun`
+  );
+};
+
 /** 获取评测任务结果 GET /api/v1/evaluation/tasks/{id}/results */
 export const getEvaluationTaskResults = (id: number) => {
   return http.request<Result>(
@@ -137,4 +147,29 @@ export const getLeaderboard = (params?: {
   return http.request<Result>("get", "/api/v1/evaluation/leaderboard", {
     params
   });
+};
+
+/** 获取评测集指标配置 GET /api/v1/benchmarks/{id}/metrics
+ *  返回 { supportedMetrics: [{value,label}], defaultSortMetric } */
+export const getBenchmarkMetrics = (id: number) => {
+  return http.request<Result>("get", `/api/v1/benchmarks/${id}/metrics`);
+};
+
+/* --------------------------- 评测报告 --------------------------- */
+
+/** 获取评测报告 GET /api/v1/evaluation/tasks/{id}/report */
+export const getEvaluationReport = (taskId: number) => {
+  return http.request<Result>("get", `/api/v1/evaluation/tasks/${taskId}/report`);
+};
+
+/** 重新生成评测报告 POST /api/v1/evaluation/tasks/{id}/report/regenerate */
+export const regenerateEvaluationReport = (
+  taskId: number,
+  force = false
+) => {
+  return http.request<Result>(
+    "post",
+    `/api/v1/evaluation/tasks/${taskId}/report/regenerate`,
+    { data: { force } }
+  );
 };

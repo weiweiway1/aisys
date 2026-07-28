@@ -27,6 +27,6 @@ public final class EvaluationConstants {
     public static final String ROUTING_KEY_EVALUATION_COMMAND = "task.command.eval";
     public static final String ROUTING_KEY_EVALUATION_STATUS  = "task.status.evaluation";
 
-    /** 排行榜默认排序指标（目标检测平台默认 mAP50；分类场景由 benchmark metrics_config 指定 accuracy） */
-    public static final String DEFAULT_SORT_METRIC = "mAP50";
+    /** 排行榜默认排序指标（空字符串 = 自动从数据中推断首个可用数值指标） */
+    public static final String DEFAULT_SORT_METRIC = "";
 }

@@ -1,8 +1,11 @@
 package com.aisys.evaluation.controller;
 
+import com.aisys.common.core.context.UserContext;
 import com.aisys.common.core.response.ApiResponse;
 import com.aisys.common.core.response.PageResult;
 import com.aisys.common.log.annotation.AuditLog;
+import com.aisys.evaluation.dto.EvaluationReportDtos.EvaluationReportResponse;
+import com.aisys.evaluation.dto.EvaluationReportDtos.RegenerateRequest;
 import com.aisys.evaluation.dto.EvaluationResultDtos.ComparisonResponse;
 import com.aisys.evaluation.dto.EvaluationResultDtos.EvaluationResultResponse;
 import com.aisys.evaluation.dto.EvaluationResultDtos.LeaderboardEntry;
@@ -30,9 +33,12 @@ import java.util.List;
 public class EvaluationTaskController {
 
     private final EvaluationTaskService taskService;
+    private final com.aisys.evaluation.service.EvaluationReportService reportService;
 
-    public EvaluationTaskController(EvaluationTaskService taskService) {
+    public EvaluationTaskController(EvaluationTaskService taskService,
+                                    com.aisys.evaluation.service.EvaluationReportService reportService) {
         this.taskService = taskService;
+        this.reportService = reportService;
     }
 
     // ---------- 任务 CRUD ----------
@@ -119,5 +125,58 @@ public class EvaluationTaskController {
     @GetMapping("/comparison")
     public ApiResponse<ComparisonResponse> comparison(@RequestParam("resultIds") List<Long> resultIds) {
         return ApiResponse.success(taskService.comparison(resultIds));
+    }
+
+    // ---------- 评测报告 ----------
+
+    /** 获取某任务的评测报告（查看页面用）。 */
+    @GetMapping("/tasks/{id}/report")
+    public ApiResponse<EvaluationReportResponse> getReport(@PathVariable("id") Long id) {
+        return ApiResponse.success(reportService.getReportByTaskId(id));
+    }
+
+    /** 手动触发重新生成报告。 */
+    @PostMapping("/tasks/{id}/report/regenerate")
+    @AuditLog(action = "GENERATE", resource = "EVALUATION_REPORT", description = "生成评测报告", resourceId = "#id")
+    public ApiResponse<Void> regenerateReport(@PathVariable("id") Long id,
+                                              @RequestBody(required = false) RegenerateRequest request) {
+        boolean force = request != null && request.force();
+        Long tenantId = UserContext.getTenantId();
+        if (tenantId == null) {
+            // 平台超管场景：从任务本身获取 tenantId（或拒绝操作）
+            throw new com.aisys.common.core.exception.BusinessException(
+                com.aisys.evaluation.constant.EvaluationErrorCode.EVALUATION_TASK_NOT_FOUND);
+        }
+        reportService.generateReportAsync(id, force, tenantId);
+        return ApiResponse.success();
+    }
+
+    /** 下载 Markdown 格式报告。 */
+    @GetMapping(value = "/tasks/{id}/report/download/md", produces = "text/markdown;charset=UTF-8")
+    public org.springframework.http.ResponseEntity<String> downloadMd(@PathVariable("id") Long id) {
+        String md = reportService.getReportMd(id);
+        if (md == null || md.isBlank()) {
+            return org.springframework.http.ResponseEntity.notFound().build();
+        }
+        return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=evaluation-report-" + id + ".md")
+                .body(md);
+    }
+
+    /** 下载 Word 格式报告（HTML → Word 兼容格式）。
+     *  注意：当前实现为 HTML 内容以 .doc 扩展名返回，Word 可直接打开。
+     *  如需真正的 .docx 格式，需集成 Apache POI / docx4j 库。 */
+    @GetMapping(value = "/tasks/{id}/report/download/word", produces = "application/msword;charset=UTF-8")
+    public org.springframework.http.ResponseEntity<byte[]> downloadWord(@PathVariable("id") Long id) throws Exception {
+        String html = reportService.getReportHtml(id);
+        if (html == null || html.isBlank()) {
+            return org.springframework.http.ResponseEntity.notFound().build();
+        }
+        // HTML 转 Word：返回 .doc 格式（Word 可打开 HTML 内容）
+        byte[] bytes = ("<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>" + html + "</body></html>")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=evaluation-report-" + id + ".doc")
+                .body(bytes);
     }
 }

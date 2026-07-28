@@ -18,6 +18,7 @@ import com.aisys.training.mapper.CheckpointMapper;
 import com.aisys.training.mapper.TaskLogMapper;
 import com.aisys.training.mapper.TaskMetricMapper;
 import com.aisys.training.mapper.TrainingTaskMapper;
+import com.aisys.training.client.ModelClient;
 import com.aisys.training.mq.NotificationEvent;
 import com.aisys.training.mq.TaskCommandMessage;
 import com.aisys.training.service.TrainingTaskService;
@@ -56,9 +57,13 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
     private final CheckpointMapper checkpointMapper;
     private final EventPublisher eventPublisher;
     private final tools.jackson.databind.ObjectMapper objectMapper;
+    private final ModelClient modelClient;
 
     @Value("${aisys.training.metrics-downsample-seconds:15}")
     private int downsampleSeconds;
+
+    @Value("${aisys.training.default-image:}")
+    private String defaultImage;  // 配置化默认镜像（留空则必须显式提供）
 
     // 复用最近降采样窗口的内存态（per-task 最近一次写入 ts）—— 简单窗口去抖；多实例下重复写可接受。
     private final Map<Long, Instant> lastMetricTs = new java.util.concurrent.ConcurrentHashMap<>();
@@ -68,13 +73,15 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
                                    TaskMetricMapper taskMetricMapper,
                                    CheckpointMapper checkpointMapper,
                                    EventPublisher eventPublisher,
-                                   tools.jackson.databind.ObjectMapper objectMapper) {
+                                   tools.jackson.databind.ObjectMapper objectMapper,
+                                   ModelClient modelClient) {
         this.taskMapper = taskMapper;
         this.taskLogMapper = taskLogMapper;
         this.taskMetricMapper = taskMetricMapper;
         this.checkpointMapper = checkpointMapper;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
+        this.modelClient = modelClient;
     }
 
     // ============== 查询 ==============
@@ -93,7 +100,12 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
     @Override
     @Transactional(readOnly = true)
     public TrainingTaskDtos.Response get(Long id) {
-        return toResponse(requireOwnedTask(id));
+        TrainingTask t = requireOwnedTask(id);
+        List<CheckpointDto> cps = checkpointMapper.listByTaskId(id).stream().map(c ->
+                new CheckpointDto(c.getId(), c.getTaskId(), c.getStep(), c.getStoragePath(),
+                        c.getLoss(), c.getMetrics(), c.getIsActive(), c.getCreatedAt())
+        ).toList();
+        return toResponse(t, cps);
     }
 
     // ============== 创建 ==============
@@ -123,8 +135,12 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
             Map<String, Object> cs = fromJsonMap(t.getContainerSpec());
             if (cs != null && cs.get("imageName") != null) {
                 t.setImage(String.valueOf(cs.get("imageName")));
+            } else if (defaultImage != null && !defaultImage.isBlank()) {
+                t.setImage(defaultImage);
+                log.info("创建训练任务：使用配置的默认镜像 image={}", defaultImage);
             } else {
-                t.setImage("model-container");
+                throw new BusinessException(TrainingErrorCode.INVALID_PARAM,
+                        "训练任务必须指定镜像（image 或 containerSpec.imageName），或配置 aisys.training.default-image");
             }
         }
         t.setStatus(TaskStatus.pending.name());
@@ -303,6 +319,7 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
             // 终态保护：已 completed/failed/cancelled 的任务不再被后续状态事件覆盖，
             // 防止乱序/重复 MQ 消息（如迟到的 running）复活已结束的任务。
             if (isTerminalStatus(t.getStatus())) {
+                saveCompletedCheckpoint(t, ev);
                 log.info("任务已终态 {}，忽略状态事件 taskId={} incoming={}", t.getStatus(), t.getId(), ev.getStatus());
                 return;
             }
@@ -320,6 +337,10 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
             }
             log.info("任务状态更新 taskId={} → {} progress={} err={}", t.getId(), status,
                     ev.getProgress(), ev.getErrorMessage());
+
+            if ("completed".equals(status)) {
+                saveCompletedCheckpoint(t, ev);
+            }
 
             if ("completed".equals(status) || "failed".equals(status)) {
                 publishNotification(t, status);
@@ -430,6 +451,39 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
             msg.setDatasetFormat((String) cs.get("datasetFormat"));
             if (cs.get("taskMode") != null) taskMode = String.valueOf(cs.get("taskMode"));
         }
+
+        // 「每个模型是一个容器」：主动查询模型版本补充镜像信息（与评测服务对称）
+        if (t.getModelVersionId() != null && (msg.getImageName() == null || msg.getImageName().isBlank())) {
+            try {
+                var resp = modelClient.getVersionById(t.getModelVersionId());
+                if (resp != null && resp.isSuccess() && resp.data() != null) {
+                    Map<String, Object> v = resp.data();
+                    // 补充 imageName
+                    if (msg.getImageName() == null || msg.getImageName().isBlank()) {
+                        Object cfg = v.get("config");
+                        if (cfg instanceof Map<?, ?> cm && cm.get("imageName") != null) {
+                            msg.setImageName(String.valueOf(cm.get("imageName")));
+                        }
+                    }
+                    // 补充 storagePath（如果 containerSpec 未提供）
+                    if ((msg.getImageTarRelPath() == null || msg.getImageTarRelPath().isBlank()) && v.get("storagePath") != null) {
+                        msg.setImageTarRelPath((String) v.get("storagePath"));
+                    }
+                }
+            } catch (Exception e) {
+                throw new BusinessException(TrainingErrorCode.INVALID_PARAM,
+                        "训练任务模型版本解析失败 taskId=" + t.getId() + " modelVersionId=" + t.getModelVersionId() + ": " + e.getMessage());
+            }
+        }
+
+        // 最终校验：镜像信息至少有一项（避免 Agent 侧无意义失败）
+        if ((msg.getImageName() == null || msg.getImageName().isBlank())
+                && (msg.getImageTarRelPath() == null || msg.getImageTarRelPath().isBlank())
+                && (msg.getImage() == null || msg.getImage().isBlank())) {
+            throw new BusinessException(TrainingErrorCode.INVALID_PARAM,
+                    "训练任务缺少镜像信息，请检查模型版本配置或 containerSpec.imageName（modelVersionId=" + t.getModelVersionId() + "）");
+        }
+
         msg.setTaskMode(taskMode);
 
         // 注入容器环境变量（Agent 透传给统一脚本）
@@ -463,6 +517,81 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
                 "TRAINING_TASK", String.valueOf(t.getId()));
     }
 
+
+    private void saveCompletedCheckpoint(TrainingTask t, com.aisys.training.mq.TaskStatusEvent ev) {
+        if (t == null || ev == null || !"completed".equalsIgnoreCase(ev.getStatus())) return;
+        Map<String, Object> extra = ev.getExtra();
+        if (extra == null || extra.isEmpty()) return;
+        String storagePath = firstText(extra, "storagePath", "outputPath", "artifactPath", "bestWeightPath", "checkpointPath");
+        if (storagePath == null || storagePath.isBlank() || storagePath.startsWith("internal://")) return;
+        boolean exists = checkpointMapper.listByTaskId(t.getId()).stream()
+                .anyMatch(cp -> storagePath.equals(cp.getStoragePath()));
+        if (exists) return;
+
+        Checkpoint cp = new Checkpoint();
+        cp.setTaskId(t.getId());
+        cp.setTenantId(t.getTenantId());
+        cp.setStep(asLong(extra.get("step"), 0L));
+        cp.setStoragePath(storagePath);
+        cp.setLoss(extractLoss(extra));
+        cp.setMetrics(toJson(extra));
+        cp.setIsActive(true);
+        checkpointMapper.clearActiveByTaskId(t.getId());
+        checkpointMapper.insert(cp);
+        log.info("保存训练最佳权重 checkpoint taskId={} path={}", t.getId(), storagePath);
+    }
+
+    private Double extractLoss(Map<String, Object> extra) {
+        Double direct = asDouble(extra.get("loss"));
+        if (direct != null) return direct;
+        Object result = extra.get("result");
+        if (result instanceof Map<?, ?> resultMap) {
+            Object metrics = resultMap.get("metrics");
+            if (metrics instanceof Map<?, ?> metricsMap) {
+                return asDouble(metricsMap.get("loss"));
+            }
+            Object inner = resultMap.get("result");
+            if (inner instanceof Map<?, ?> innerMap) {
+                Object innerMetrics = innerMap.get("metrics");
+                if (innerMetrics instanceof Map<?, ?> metricsMap) {
+                    return asDouble(metricsMap.get("loss"));
+                }
+            }
+        }
+        return null;
+    }
+
+    private String firstText(Map<String, Object> data, String... keys) {
+        if (data == null) return null;
+        for (String key : keys) {
+            Object value = data.get(key);
+            if (value != null) {
+                String text = String.valueOf(value);
+                if (!text.isBlank()) return text;
+            }
+        }
+        return null;
+    }
+
+    private Long asLong(Object value, Long fallback) {
+        if (value == null) return fallback;
+        if (value instanceof Number n) return n.longValue();
+        try { return Long.valueOf(String.valueOf(value)); } catch (Exception e) { return fallback; }
+    }
+
+    private Double asDouble(Object value) {
+        if (value == null) return null;
+        if (value instanceof Number n) return n.doubleValue();
+        try { return Double.valueOf(String.valueOf(value)); } catch (Exception e) { return null; }
+    }
+
+    private String sanitizeLogMessage(String message) {
+        if (message == null) return null;
+        return message
+                .replaceAll("\\u001B\\[[;?0-9]*[ -/]*[@-~]", "")
+                .replaceAll("[\\p{Cntrl}&&[^\\r\\n\\t]]", "");
+    }
+
     private void saveCheckpointPlaceholder(TrainingTask t, String reason) {
         Checkpoint cp = new Checkpoint();
         cp.setTaskId(t.getId());
@@ -477,6 +606,10 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
     }
 
     private TrainingTaskDtos.Response toResponse(TrainingTask t) {
+        return toResponse(t, null);
+    }
+
+    private TrainingTaskDtos.Response toResponse(TrainingTask t, List<CheckpointDto> checkpoints) {
         return new TrainingTaskDtos.Response(
                 t.getId(), t.getTenantId(), t.getProjectId(), t.getName(),
                 t.getModelVersionId(), t.getDatasetVersionId(), t.getImage(), t.getCommand(),
@@ -484,7 +617,8 @@ public class TrainingTaskServiceImpl implements TrainingTaskService {
                 fromJson(t.getContainerSpec()),
                 t.getStatus(), t.getPriority(), t.getAssignedNodeId(), t.getProgress(),
                 t.getErrorMessage(), t.getStartedAt(), t.getCompletedAt(),
-                t.getCreatedBy(), t.getCreatedAt(), t.getUpdatedAt()
+                t.getCreatedBy(), t.getCreatedAt(), t.getUpdatedAt(),
+                checkpoints
         );
     }
 

@@ -64,5 +64,15 @@ export default [
       title: $t("menus.pureEmpty"),
       showLink: false
     }
+  },
+  // 评测报告页面（从任务列表"查看报告"按钮跳转）
+  {
+    path: "/evaluation/report/:id",
+    name: "EvaluationReport",
+    component: () => import("@/views/evaluation/report/index.vue"),
+    meta: {
+      title: "评测报告",
+      showLink: false
+    }
   }
 ] satisfies Array<RouteConfigsTable>;

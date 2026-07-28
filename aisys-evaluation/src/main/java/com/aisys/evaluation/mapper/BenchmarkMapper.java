@@ -33,4 +33,7 @@ public interface BenchmarkMapper {
                @Param("status") String status);
 
     int deleteByIdAndTenant(@Param("id") Long id, @Param("tenantId") Long tenantId);
+
+    /** 查找租户下第一个 active 状态的 benchmark（用于自动评测） */
+    Benchmark selectActiveByTenant(@Param("tenantId") Long tenantId);
 }

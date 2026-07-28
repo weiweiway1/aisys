@@ -139,7 +139,7 @@ async function loadDatasetVersions() {
       const vr: any = await http.request("get", `/api/v1/datasets/${d.id}/versions`);
       const versions = vr?.data?.items ?? (Array.isArray(vr?.data) ? vr.data : []);
       for (const v of versions) {
-        if (v.status === "ready") flat.push({ id: v.id, label: `${d.name} @ ${v.version}` });
+        if (v.status === "ready") flat.push({ id: v.id, label: `${d.name}-${v.version}` });
       }
     }
     datasetVersionOptions.value = flat;
@@ -173,7 +173,7 @@ const detailDatasetLabels = computed(() => {
   const ids = currentDetail.value?.datasetVersionIds;
   if (!Array.isArray(ids) || !ids.length) return [];
   const map = new Map(datasetVersionOptions.value.map(d => [d.id, d.label]));
-  return ids.map((id: number) => map.get(id) ?? `数据集版本 #${id}`);
+  return ids.map((id: number) => map.get(id) ?? `数据集版本#${id}`);
 });
 
 const handleSubmit = async (formEl: FormInstance | undefined) => {

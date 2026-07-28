@@ -29,6 +29,8 @@ public final class EvaluationResultDtos {
     public record LeaderboardEntry(
             Long resultId,
             Long modelVersionId,
+            String modelName,
+            String modelVersion,
             Long benchmarkId,
             Integer sampleCount,
             Double sortScore,

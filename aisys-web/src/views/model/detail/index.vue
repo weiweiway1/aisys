@@ -107,7 +107,7 @@ const versionStatusMap = (s?: string) => {
 
 /* ======================== 上传新版本 ======================== */
 const uploadVisible = ref(false);
-const uploadForm = reactive({ version: "", file: null as File | null });
+const uploadForm = reactive({ version: "", file: null as File | null, imageName: "" });
 const uploading = ref(false);
 const uploadProgress = ref(0);
 const uploadStatusText = ref("");
@@ -115,6 +115,7 @@ const uploadStatusText = ref("");
 const openUpload = () => {
   uploadForm.version = "";
   uploadForm.file = null;
+  uploadForm.imageName = "";
   uploadProgress.value = 0;
   uploadStatusText.value = "";
   uploadVisible.value = true;
@@ -147,15 +148,16 @@ const calculateFileHash = (file: File): Promise<string> => {
   });
 };
 
-/** 修正 S3 预签名 URL 的 hostname（同 list 页逻辑） */
+/** 将 S3 预签名 URL 改为同源 nginx 反代路径 /s3-upload/ */
 const fixPresignUrl = (url: string): string => {
   try {
     const u = new URL(url);
-    if (u.port === "8333" && !/^(localhost|127\.0\.0\.1|\d{1,3}(\.\d{1,3}){3})$/.test(u.hostname)) {
-      const pageHost = new URL(window.location.origin).hostname;
-      u.hostname = pageHost;
+    if (u.port === "8333" || u.hostname === "seaweedfs") {
+      // 提取完整路径+查询参数，挂到同源 /s3-upload/ 下
+      const pathAndQuery = u.pathname + u.search;
+      return `${window.location.origin}/s3-upload${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
     }
-    return u.toString();
+    return url;
   } catch {
     return url;
   }
@@ -170,7 +172,8 @@ const uploadChunkToS3 = (
   return new Promise((resolve, reject) => {
     const fixedUrl = fixPresignUrl(url);
     const idxTag = `chunk#${Math.random().toString(36).slice(2, 6)}`;
-    console.log(`[Detail-Diag] ${idxTag} PUT开始 size=${blob.size}MB url=${fixedUrl.substring(0, 100)}...`);
+    console.log(`[Detail-Diag] ${idxTag} PUT开始 size=${blob.size}MB url=${fixedUrl}`);
+    console.log(`[Detail-Diag] ${idxTag} 原始url=${url}`);
 
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", fixedUrl);
@@ -228,9 +231,10 @@ const submitUpload = async () => {
   uploadStatusText.value = "创建版本...";
 
   try {
-    // 1. 创建版本
+    // 1. 创建版本（config.imageName 是 docker run 必需的镜像名）
     console.log("[Detail-Diag] 步骤1: 创建版本...");
-    const verRes: any = await createModelVersion(modelId.value, { version });
+    const config = uploadForm.imageName.trim() ? { imageName: uploadForm.imageName.trim() } : undefined;
+    const verRes: any = await createModelVersion(modelId.value, { version, config });
     if (!verRes || verRes.code !== 0) throw new Error(verRes?.message || "创建版本失败");
     const versionId = verRes.data.id;
     console.log("[Detail-Diag] 步骤1 ✅ versionId=", versionId);
@@ -428,9 +432,13 @@ onMounted(() => {
       :close-on-press-escape="!uploading"
       :show-close="!uploading"
     >
-      <el-form label-width="80px" :disabled="uploading">
+      <el-form label-width="100px" :disabled="uploading">
         <el-form-item label="版本号">
           <el-input v-model="uploadForm.version" placeholder="例如 v2.0, v1.1-beta" />
+        </el-form-item>
+        <el-form-item label="镜像名称" required>
+          <el-input v-model="uploadForm.imageName" placeholder="例如 aisys/ultralytics-yolo-cls:v1（docker run 使用的镜像名）" />
+          <div class="upload-tip">Docker 容器镜像名，用于训练/评测时 docker run 启动容器。必须与构建镜像时的 tag 一致。</div>
         </el-form-item>
         <el-form-item label="模型文件">
           <el-upload
