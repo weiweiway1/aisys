@@ -2,6 +2,7 @@
 import { h, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElTag, ElButton } from "element-plus";
+import dayjs from "dayjs";
 import type { FormInstance, FormRules } from "element-plus";
 import {
   getDatasetList,
@@ -98,7 +99,7 @@ const columns: TableColumnList = [
     }
   },
   { label: "样本数", width: 110, align: "right", cellRenderer: ({ row }) => formatNumber(row.sampleCount) },
-  { label: "创建时间", width: 170, cellRenderer: ({ row }) => row.createdAt || "-" },
+  { label: "创建时间", width: 170, cellRenderer: ({ row }) => row.createdAt ? dayjs(row.createdAt).format("YYYY-MM-DD HH:mm:ss") : "-" },
   {
     label: "操作",
     width: 200,

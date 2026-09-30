@@ -41,7 +41,13 @@ public final class DatasetVersionDtos {
             String status,
             Long createdBy,
             Instant createdAt,
-            Instant updatedAt
+            Instant updatedAt,
+            // 父表 dataset 的元数据（JOIN 填充，便于评测/训练侧不经第二次查询拿到数据集名/描述/任务类型）
+            String datasetName,
+            String datasetDescription,
+            String taskType,
+            String format,
+            Long sampleCount
     ) {}
 
     /** 预览响应：{columns, rows, total}（DDD 5.4）。 */

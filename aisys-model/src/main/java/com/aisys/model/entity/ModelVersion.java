@@ -19,6 +19,11 @@ public class ModelVersion {
     private Long createdBy;
     private Instant createdAt;
     private Instant updatedAt;
+    // —— 以下为 JOIN 父表 model 填充的瞬态字段（非 model_version 表列，不参与 insert/update）——
+    private String modelName;
+    private String modelDescription;
+    private String taskType;      // 对应 model.type（image_classification/object_detection/time_series/...）
+    private String framework;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -44,4 +49,12 @@ public class ModelVersion {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public String getModelName() { return modelName; }
+    public void setModelName(String modelName) { this.modelName = modelName; }
+    public String getModelDescription() { return modelDescription; }
+    public void setModelDescription(String modelDescription) { this.modelDescription = modelDescription; }
+    public String getTaskType() { return taskType; }
+    public void setTaskType(String taskType) { this.taskType = taskType; }
+    public String getFramework() { return framework; }
+    public void setFramework(String framework) { this.framework = framework; }
 }

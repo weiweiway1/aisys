@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { Document, Download } from "@element-plus/icons-vue";
 import { useDark, useECharts } from "@pureadmin/utils";
+import dayjs from "dayjs";
 import {
   getTaskDetail,
   getTaskMetrics,
@@ -107,84 +108,61 @@ async function loadDetail() {
 }
 
 function buildChartOption(points: TrainingMetricPoint[]) {
-  const sorted = [...points].sort((a, b) => a.step - b.step);
-  const steps = sorted.map(p => p.step);
-  const loss = sorted.map(p => p.metrics?.loss ?? null);
-  const lr = sorted.map(p => p.metrics?.lr ?? null);
-  const accuracy = sorted.map(p => p.metrics?.accuracy ?? null);
+  // 排序：有 step 按 step，step 为空按 ts 时间字符串；都没有保持原序
+  const sorted = [...points].sort((a, b) => {
+    const sa = a.step ?? null;
+    const sb = b.step ?? null;
+    if (sa != null && sb != null) return sa - sb;
+    if (sa != null) return -1;
+    if (sb != null) return 1;
+    return String(a.ts ?? "").localeCompare(String(b.ts ?? ""));
+  });
+  // x 轴：任一点有 step 就用 step，否则用时间（formatLogTime 已定义在下面，hoist 后可用）
+  const hasStep = sorted.some(p => p.step != null);
+  const xData = sorted.map(p =>
+    hasStep ? String(p.step ?? "") : formatLogTime(p.ts)
+  );
+  // 动态收集所有 metric key 作为 series（不硬编码 loss/lr/accuracy，
+  // 容器 emit 什么就画什么：top1_acc / mAP50 / val_loss / ...）
+  const keySet = new Set<string>();
+  sorted.forEach(p => {
+    if (p.metrics) Object.keys(p.metrics).forEach(k => keySet.add(k));
+  });
+  const keys = Array.from(keySet);
+  const series = keys.map(k => ({
+    name: k,
+    type: "line",
+    smooth: true,
+    symbol: "circle",
+    symbolSize: 6,
+    data: sorted.map(p =>
+      p.metrics && p.metrics[k] != null ? p.metrics[k] : null
+    )
+  }));
   return {
-    title: {
-      text: "训练指标",
-      left: "center"
-    },
-    tooltip: {
-      trigger: "axis"
-    },
-    legend: {
-      data: ["loss", "lr", "accuracy"],
-      top: 30
-    },
-    grid: {
-      top: 70,
-      left: 60,
-      right: 40,
-      bottom: 50
-    },
-    xAxis: {
-      type: "category",
-      name: "step",
-      data: steps
-    },
-    yAxis: {
-      type: "value"
-    },
-    series: [
-      {
-        name: "loss",
-        type: "line",
-        smooth: true,
-        symbol: "circle",
-        symbolSize: 6,
-        data: loss
-      },
-      {
-        name: "lr",
-        type: "line",
-        smooth: true,
-        symbol: "circle",
-        symbolSize: 6,
-        data: lr
-      },
-      {
-        name: "accuracy",
-        type: "line",
-        smooth: true,
-        symbol: "circle",
-        symbolSize: 6,
-        data: accuracy
-      }
-    ]
+    title: { text: "训练指标", left: "center" },
+    tooltip: { trigger: "axis" },
+    legend: { data: keys, top: 40 },
+    grid: { top: 95, left: 60, right: 40, bottom: 50 },
+    xAxis: { type: "category", name: hasStep ? "step" : "时间", data: xData },
+    yAxis: { type: "value" },
+    series
   };
 }
 
-/** 示例数据，后端无指标时展示 */
-function buildSampleOption() {
-  const steps = Array.from({ length: 20 }, (_, i) => i + 1);
-  const loss = steps.map(s => Math.max(0.05, 2.5 * Math.exp(-s / 6)));
-  const lr = steps.map(s => 0.01 * (1 - s / 40));
-  const accuracy = steps.map(s => Math.min(0.99, 0.3 + s * 0.03));
+/** 无指标数据时显示空图（不回退示例数据，避免误导用户以为没接通） */
+function buildEmptyOption() {
   return {
-    title: { text: "训练指标（示例数据）", left: "center" },
-    tooltip: { trigger: "axis" },
-    legend: { data: ["loss", "lr", "accuracy"], top: 30 },
+    title: {
+      text: "暂无指标数据",
+      left: "center",
+      top: "middle",
+      textStyle: { color: "#999", fontSize: 14 }
+    },
     grid: { top: 70, left: 60, right: 40, bottom: 50 },
-    xAxis: { type: "category", name: "step", data: steps },
+    xAxis: { type: "category", data: [] },
     yAxis: { type: "value" },
-    series: [
-      { name: "loss", type: "line", smooth: true, data: loss },
-      { name: "lr", type: "line", smooth: true, data: lr },
-      { name: "accuracy", type: "line", smooth: true, data: accuracy }
-    ]
+    series: []
   };
 }
 
@@ -200,12 +178,12 @@ async function loadMetrics() {
     setOptions(
       Array.isArray(points) && points.length > 0
         ? buildChartOption(points)
-        : buildSampleOption(),
+        : buildEmptyOption(),
       { notMerge: true }
     );
   } catch (e: any) {
     await nextTick();
-    setOptions(buildSampleOption(), { notMerge: true });
+    setOptions(buildEmptyOption(), { notMerge: true });
   }
 }
 
@@ -217,7 +195,8 @@ async function loadLogs() {
       size: logQuery.size
     });
     if (res.code === 0 && res.data) {
-      logs.value = (res.data.items ?? []) as TrainingLog[];
+      // 后端 ORDER BY logged_at DESC 返回最新 N 条；反转为 ASC 渲染，最新在底部，配合 scrollToBottom。
+      logs.value = ((res.data.items ?? []) as TrainingLog[]).slice().reverse();
       logTotal.value = res.data.total ?? 0;
     }
   } catch (e: any) {
@@ -246,14 +225,21 @@ function reload() {
   });
 }
 
+function isTerminalStatus(status?: string) {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
 let timer: any = null;
 function startPolling() {
   stopPolling();
+  // running 态 3s 轮询（训练实时性强，10s 太慢看不到 epoch 进度）；任务到终态后停止轮询
   timer = setInterval(() => {
-    loadDetail();
-    loadMetrics();
-    loadLogs();
-  }, 10000);
+    Promise.all([loadDetail(), loadMetrics(), loadLogs()]).then(() => {
+      if (task.value && isTerminalStatus(task.value.status)) {
+        stopPolling();
+      }
+    });
+  }, 3000);
 }
 function stopPolling() {
   if (timer) {
@@ -326,7 +312,7 @@ function handleDownload(cp: Checkpoint) {
           </span>
           <span>
             创建：
-            <span class="text-gray-600">{{ task.createdAt || "-" }}</span>
+            <span class="text-gray-600">{{ task.createdAt ? dayjs(task.createdAt).format("YYYY-MM-DD HH:mm:ss") : "-" }}</span>
           </span>
         </div>
       </div>
@@ -368,7 +354,7 @@ function handleDownload(cp: Checkpoint) {
               <div class="text-xs text-gray-400 mt-0.5">
                 Step {{ cp.step ?? '-' }}
                 <span v-if="cp.loss != null" class="ml-2">Loss: {{ typeof cp.loss === 'number' ? cp.loss.toFixed(4) : cp.loss }}</span>
-                <span v-if="cp.createdAt" class="ml-2">{{ cp.createdAt }}</span>
+                <span v-if="cp.createdAt" class="ml-2">{{ dayjs(cp.createdAt).format("YYYY-MM-DD HH:mm:ss") }}</span>
               </div>
             </div>
           </div>

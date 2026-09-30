@@ -283,7 +283,8 @@ public class ModelVersionServiceImpl implements ModelVersionService {
         return new ModelVersionResponse(
                 v.getId(), v.getModelId(), v.getVersion(), v.getStoragePath(),
                 v.getFileSize(), v.getChecksum(), v.getStatus(),
-                config, v.getCreatedBy(), v.getCreatedAt(), v.getUpdatedAt());
+                config, v.getCreatedBy(), v.getCreatedAt(), v.getUpdatedAt(),
+                v.getModelName(), v.getModelDescription(), v.getTaskType(), v.getFramework());
     }
 
     private static final class MAPPER_HELPER {

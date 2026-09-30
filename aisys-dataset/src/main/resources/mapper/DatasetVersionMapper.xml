@@ -16,13 +16,25 @@
         <result property="createdBy" column="created_by"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
+        <!-- JOIN 父表 dataset 填充的瞬态字段（仅 selectById 等带 JOIN 的查询会赋值，其余为 null） -->
+        <result property="datasetName"        column="dataset_name"/>
+        <result property="datasetDescription" column="dataset_description"/>
+        <result property="taskType"           column="dataset_task_type"/>
+        <result property="format"             column="dataset_format"/>
+        <result property="sampleCount"        column="dataset_sample_count"/>
     </resultMap>
 
     <sql id="cols">id, dataset_id, tenant_id, version, storage_path, file_size, checksum,
         row_count, column_info, status, created_by, created_at, updated_at</sql>
 
     <select id="selectById" resultMap="versionMap">
-        SELECT <include refid="cols"/> FROM dataset_version WHERE id = #{id}
+        SELECT v.id, v.dataset_id, v.tenant_id, v.version, v.storage_path, v.file_size, v.checksum,
+               v.row_count, v.column_info::text AS column_info, v.status, v.created_by, v.created_at, v.updated_at,
+               d.name AS dataset_name, d.description AS dataset_description,
+               d.task_type AS dataset_task_type, d.format AS dataset_format, d.sample_count AS dataset_sample_count
+        FROM dataset_version v
+        LEFT JOIN dataset d ON d.id = v.dataset_id
+        WHERE v.id = #{id}
     </select>
 
     <select id="selectByDatasetAndVersion" resultMap="versionMap">

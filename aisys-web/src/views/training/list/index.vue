@@ -8,6 +8,7 @@ import {
   ElButton,
   ElProgress
 } from "element-plus";
+import dayjs from "dayjs";
 import type { FormInstance, FormRules } from "element-plus";
 import {
   getTaskList,
@@ -136,7 +137,7 @@ const columns: TableColumnList = [
     prop: "createdAt",
     width: 180,
     align: "center",
-    cellRenderer: ({ row }) => row.createdAt || "-"
+    cellRenderer: ({ row }) => row.createdAt ? dayjs(row.createdAt).format("YYYY-MM-DD HH:mm:ss") : "-"
   },
   {
     label: "操作",

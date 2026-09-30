@@ -35,7 +35,12 @@ public final class VersionDtos {
             Object config,
             Long createdBy,
             Instant createdAt,
-            Instant updatedAt
+            Instant updatedAt,
+            // 父表 model 的元数据（JOIN 填充，便于评测/训练侧不经第二次查询拿到模型名/描述/任务类型）
+            String modelName,
+            String modelDescription,
+            String taskType,
+            String framework
     ) {}
 
     // ---------- 分片上传 ----------

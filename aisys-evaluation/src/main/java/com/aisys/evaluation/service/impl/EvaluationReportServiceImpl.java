@@ -8,10 +8,12 @@ import com.aisys.common.core.exception.BusinessException;
 import com.aisys.evaluation.dto.EvaluationReportDtos.EvaluationReportResponse;
 import com.aisys.evaluation.entity.EvaluationReport;
 import com.aisys.evaluation.entity.EvaluationResult;
+import com.aisys.evaluation.entity.EvaluationSubtask;
 import com.aisys.evaluation.entity.EvaluationTask;
 import com.aisys.evaluation.mapper.BenchmarkMapper;
 import com.aisys.evaluation.mapper.EvaluationReportMapper;
 import com.aisys.evaluation.mapper.EvaluationResultMapper;
+import com.aisys.evaluation.mapper.EvaluationSubtaskMapper;
 import com.aisys.evaluation.mapper.EvaluationTaskMapper;
 import com.aisys.evaluation.service.EvaluationReportService;
 import com.aisys.evaluation.constant.EvaluationErrorCode;
@@ -71,6 +73,7 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
     private final EvaluationReportMapper reportMapper;
     private final EvaluationTaskMapper taskMapper;
     private final EvaluationResultMapper resultMapper;
+    private final EvaluationSubtaskMapper subtaskMapper;
     private final BenchmarkMapper benchmarkMapper;
     private final com.aisys.evaluation.client.ModelClient modelClient;
     private final com.aisys.evaluation.client.DatasetClient datasetClient;
@@ -79,6 +82,7 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
     public EvaluationReportServiceImpl(EvaluationReportMapper reportMapper,
                                        EvaluationTaskMapper taskMapper,
                                        EvaluationResultMapper resultMapper,
+                                       EvaluationSubtaskMapper subtaskMapper,
                                        BenchmarkMapper benchmarkMapper,
                                        com.aisys.evaluation.client.ModelClient modelClient,
                                        com.aisys.evaluation.client.DatasetClient datasetClient,
@@ -86,6 +90,7 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
         this.reportMapper = reportMapper;
         this.taskMapper = taskMapper;
         this.resultMapper = resultMapper;
+        this.subtaskMapper = subtaskMapper;
         this.benchmarkMapper = benchmarkMapper;
         this.modelClient = modelClient;
         this.datasetClient = datasetClient;
@@ -214,7 +219,13 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
                 // 5. 构建提示词
                 ReportContext ctx = buildContext(taskId, tenantId);
                 String userPrompt = buildUserPrompt(ctx);
-                String systemPrompt = SYSTEM_PROMPT_TEMPLATE;
+                // 按任务类型选 system prompt 骨架，替换 {taskName}；
+                // benchmark.prompt_template 非空时作为 per-benchmark 风格补充 append 到末尾。
+                String systemPrompt = chooseSystemPrompt(ctx.modelTaskType())
+                        .replace("{taskName}", nonNull(ctx.taskName()));
+                if (ctx.benchmarkPromptTemplate() != null && !ctx.benchmarkPromptTemplate().isBlank()) {
+                    systemPrompt += "\n\n## 测评集自定义补充要求\n" + ctx.benchmarkPromptTemplate();
+                }
 
                 // 6. 调用 LLM
                 String mdContent = callLlm(systemPrompt, userPrompt);
@@ -250,146 +261,208 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
     // ==================== Prompt 构建 ====================
 
     /**
-     * 系统级提示词模板（固定不变，与项目特点结合）。
-     * 面向 AI 模型评测场景：分类/检测任务的指标分析。
+     * 系统级提示词模板（通用骨架）。
+     * <p>不硬编码具体指标名——指标清单来自容器实际输出的 JSONB key（数据驱动）。
+     * {metricHint} 由 {@link #chooseSystemPrompt(String)} 按任务类型替换为该类任务常见的指标举例
+     * （仅作 LLM 解读参考，不限定）；{taskName} 在运行时替换为实际任务名。
      */
     private static final String SYSTEM_PROMPT_TEMPLATE = """
-            你是一位资深的AI模型评测分析师，专精于计算机视觉模型（目标检测、图像分类）的性能评估。
-            
-            ## 你的角色
-            - 基于客观数据进行专业分析，不夸大、不贬低
-            - 用数据说话，每个结论都要引用具体数值
-            - 输出中文
-            
-            ## 报告结构要求
-            请严格按以下章节输出：
-            
+            你是一位资深的 AI 模型评测分析师。基于客观数据进行专业分析，输出中文。
+
+            ## 风格要求（必须遵守）
+            - 严肃准确，禁营销化措辞（"惊艳/强大/完美/卓越"等），只用中性技术语。
+            - 每个结论必须引用具体数值（指标名 + 数值）。
+            - 数据不足或样本量过小时，显式标注"样本量不足，结论待验证"，不得臆测。
+            - 不臆测未提供的原因；改进建议必须基于已给出的数据。
+            - 若模型或数据集描述缺失，依据任务类型与模型架构推断分析，报告中不出现"暂无""未知"字样。
+
+            ## 报告结构（严格按此输出）
+
             # {taskName} — 模型评测分析报告
-            
+
             ## 一、评测概况
-            - 任务名称、模型信息、测评集、评测时间
-            - 一句话总体评价
-            
+            任务名 / 模型（名称+版本+任务类型）/ 测评集 / 数据集（名称+任务类型）/ 样本数 / 评测时间 / 一句话总体评价。
+
             ## 二、核心指标解读
-            逐项分析以下指标（有值才写）：
-            - **准确率类**：Top-1 Accuracy / Top-5 Accuracy / mAP 等
-            - **精确率与召回率**：整体及各类别表现
-            - **F1-Score**：综合性能
-            - **混淆矩阵分析**：指出最容易混淆的类别对，分析原因
-            - **推理速度**：预处理 / 推理 / 后处理耗时分析
-            
-            ## 三、类别级详细分析
-            如果有各类别 Precision/Recall/F1 数据，按表格列出：
-            | 类别 | 样本数 | Precision | Recall | F1-Score |
-            
-            ## 四、优势与不足
-            ### 优势（3~5条）
-            ### 不足与风险（2~4条）
-            
-            五、改进建议
-            给出 3~5 条具体可行的优化方向（如数据增强、超参调整、模型选型等）
-            
+            对"本次评测产出指标"清单中的每个指标，逐一给出数值并判断其相对高低或是否达标。
+            {metricHint}
+
+            ## 三、类别级 / 分组级详细分析
+            若 category_scores 提供了分组数据（各类别/各分组），用表格列出关键组别的指标；无分组数据则跳过本节。
+
+            ## 四、弱项与风险
+            按链式结构组织：问题描述 — 证据（引用具体指标数值与所在分组）— 量化影响 — 可能原因 — 改进建议。
+            按"漏检/误检/类别混淆/定位偏差/置信度异常/输出协议异常"分类（适用项才写，不适用则不写）。
+            对"显著偏低或相比同类骤降"的指标标注 **高风险** 并限定使用场景；子任务错误信息（若有）作为输出协议异常/失败模式的证据。
+
+            ## 五、改进建议（三档，每条绑定指标与量化预期收益）
+            ### 立即可做（不改模型：阈值/后处理/输入尺寸，量化预期收益）
+            ### 需返工（数据补强/数据增强/难负样本，量化预期收益与工作量）
+            ### 需重训练（结构调整/模型选型/超参，量化预期收益与工作量）
+
             ## 六、结论与部署建议
-            - 是否适合当前场景部署？
-            - 与同类模型对比的相对位置
-            - 最终推荐意见
-            
+            是否适合部署 + 红线判定（高风险项是否阻断）+ 最终推荐意见（推荐 / 受限推荐 / 不推荐）。
+
             ---
             *本报告由 AISys 评测平台自动生成*
             """;
 
+    /** 按任务类型选择指标解读举例（仅作 LLM 参考，不限定指标范围）。 */
+    private static String chooseSystemPrompt(String modelTaskType) {
+        String hint;
+        if (modelTaskType == null) {
+            hint = "不举具体指标例子，按给出的指标清单逐项解读。";
+        } else switch (modelTaskType.toLowerCase()) {
+            case "object_detection":
+                hint = "检测类任务常见指标：mAP@0.5、mAP@0.5:0.95、AP_small/medium/large、Precision/Recall、分尺度 AP。可分析小目标与密集目标能力。";
+                break;
+            case "image_classification":
+                hint = "分类任务常见指标：Top-1/Top-5 Accuracy、Macro-F1、混淆矩阵（最易混淆的类别对）。可分析类间混淆与置信度校准。";
+                break;
+            case "time_series":
+                hint = "时序预测任务常见指标：MAE/RMSE/MAPE、趋势准确率、异常召回率、误差随预测步长累积形态。不出现 mAP/混淆矩阵。";
+                break;
+            default:
+                hint = "不举具体指标例子，按给出的指标清单逐项解读。";
+        }
+        return SYSTEM_PROMPT_TEMPLATE.replace("{metricHint}", hint);
+    }
+
     /**
-     * 运行时数据上下文（动态合成，注入具体评测数据）。
+     * 用户级提示词模板（通用结构，不写死指标名）。占位符在 {@link #buildUserPrompt} 替换。
      */
     private static final String USER_PROMPT_TEMPLATE = """
             ## 评测基本信息
             - **任务名称**: {taskName}
-            - **模型**: {modelName} {modelVersion}
-            - **测评集**: {benchmarkName} ({benchmarkDescription})
+            - **模型**: {modelName} {modelVersion}（任务类型: {modelTaskType}）
+            - **测评集**: {benchmarkName}
+            - **数据集**: {datasetName}（任务类型: {datasetTaskType}，样本数: {sampleCount}）
             - **评测时间**: {evalTime}
-            - **样本总数**: {sampleCount}
-            
-            ## 数据集描述
-            {datasetDescription}
-            
+
+            ## 本次评测产出指标（来自容器输出，按此清单解读）
+            {metricKeys}
+
             ## 模型描述
             {modelDescription}
-            
-            ## 原始评测结果（JSON）
-            ```json
-            {metricsJson}
-            ```
-            
-            ## 各类别指标详情
-            {classMetricsTable}
-            
-            请根据以上数据撰写完整的评测分析报告。
+
+            ## 数据集描述
+            {datasetDescription}
+
+            ## 测评集说明
+            {benchmarkDescription}
+
+            ## 超参 / 任务配置
+            {taskConfig}
+
+            ## 测评集指标定义（可选，来自 benchmark.metrics_config；可能为空）
+            {metricsConfigJson}
+
+            ## 评测结果（每个被测模型一段；多模型时全部列出便于横向对比）
+            {multiResultsJson}
+
+            ## 子任务错误信息（失败分析依据；无错误则空）
+            {subtaskErrors}
+
+            请按系统提示的章节结构撰写报告。
             """;
 
-    /** 报告构建所需的数据上下文。 */
+    /** 报告构建所需的数据上下文（通用化：含任务类型、数据反推的指标清单、多模型结果、子任务错误等）。 */
     private record ReportContext(
             String taskName,
             String modelName,
             String modelVersion,
+            String modelTaskType,
+            String modelDescription,
             String benchmarkName,
             String benchmarkDescription,
+            String benchmarkPromptTemplate,
+            String metricsConfigJson,
+            String datasetName,
             String datasetDescription,
-            String modelDescription,
+            String datasetTaskType,
             String evalTime,
             Integer sampleCount,
-            String metricsJson,
-            String classMetricsTable
+            String metricKeys,
+            String multiResultsJson,
+            String subtaskErrors,
+            String taskConfig
     ) {}
 
     /**
-     * 从数据库收集报告所需的全部上下文数据。
+     * 从数据库收集报告所需的全部上下文数据（通用版，不依赖具体模型类型）。
+     * <p>关键设计：
+     * <ul>
+     *   <li>模型元数据（modelName/modelDescription/taskType）经 Task#6 改造后的 ModelClient 直接返回，无需第二次查询。</li>
+     *   <li>数据集元数据（datasetName/datasetDescription/taskType）经 Task#7 改造后的 DatasetClient 直接返回。</li>
+     *   <li>指标清单（metricKeys）从所有 result 的 overallScores + categoryScores JSONB 顶层 key 反推（数据驱动，不硬编码 mAP/Top-1）。</li>
+     *   <li>多模型评测：循环每个 result，全部塞进 multiResultsJson 供 LLM 横向对比。</li>
+     *   <li>子任务 errorMessage + benchmark.metrics_config + benchmark.prompt_template 全部读出喂给 LLM。</li>
+     * </ul>
      */
     private ReportContext buildContext(Long taskId, Long tenantId) {
         EvaluationTask task = taskMapper.selectByIdAndTenant(taskId, tenantId);
         if (task == null) throw new BusinessException(EvaluationErrorCode.EVALUATION_TASK_NOT_FOUND);
 
-        // 评测结果
         List<EvaluationResult> results = resultMapper.selectByTaskId(taskId, tenantId);
-        Map<String, Object> overallScores = results.isEmpty()
-                ? Map.of()
-                : EvalJson.toMap(results.get(0).getOverallScores());
+        List<EvaluationSubtask> subtasks = subtaskMapper.selectByParentTaskId(taskId, tenantId);
 
-        // 模型信息
-        String modelName = "未知模型";
-        String modelVersion = "";
-        String modelDesc = "暂无模型描述";
-        if (!results.isEmpty()) {
-            Long mvid = results.get(0).getModelVersionId();
-            log.info("[Report] 查询模型信息 modelVersionId={}", mvid);
-            try {
-                var resp = modelClient.getVersionById(mvid);
-                log.info("[Report] modelClient 响应 isSuccess={} data={}",
-                        resp != null ? resp.isSuccess() : "null",
-                        resp != null && resp.data() != null ? "有数据" : "null");
-                if (resp != null && resp.isSuccess() && resp.data() != null) {
-                    Map<String, Object> v = resp.data();
-                    modelName = (String) v.getOrDefault("modelName", v.getOrDefault("name", "未知模型"));
-                    modelVersion = (String) v.getOrDefault("version", "");
-                    modelDesc = (String) v.getOrDefault("description", "暂无模型描述");
-                }
-            } catch (Exception e) {
-                log.warn("[Report] 获取模型信息失败: {}", e.getMessage());
-            }
-        } else {
-            log.warn("[Report] 无评测结果，跳过模型/数据集信息查询");
-        }
-
-        // 测评集信息
+        // —— benchmark（含 metricsConfig / promptTemplate 两个现成钩子）——
         String benchmarkName = "未知测评集";
         String benchmarkDesc = "";
-        String datasetDesc = "暂无数据集描述";
-        var benchmark = benchmarkMapper.selectByIdAndTenant(task.getBenchmarkId(), tenantId);
-        if (benchmark != null) {
-            benchmarkName = benchmark.getName();
-            benchmarkDesc = benchmark.getDescription() != null ? benchmark.getDescription() : "";
+        String metricsConfigJson = "";
+        String benchmarkPromptTemplate = "";
+        if (task.getBenchmarkId() != null) {
+            var benchmark = benchmarkMapper.selectByIdAndTenant(task.getBenchmarkId(), tenantId);
+            if (benchmark != null) {
+                benchmarkName = benchmark.getName() != null ? benchmark.getName() : benchmarkName;
+                benchmarkDesc = benchmark.getDescription() != null ? benchmark.getDescription() : "";
+                metricsConfigJson = benchmark.getMetricsConfig() != null ? benchmark.getMetricsConfig() : "";
+                benchmarkPromptTemplate = benchmark.getPromptTemplate() != null ? benchmark.getPromptTemplate() : "";
+            }
+        }
 
-            // 通过 DatasetClient 获取数据集描述
-            if (benchmark.getDatasetVersionIds() != null && !benchmark.getDatasetVersionIds().isBlank()) {
+        // —— 每个被测模型一段：{modelName, modelVersion, overallScores, categoryScores} ——
+        String modelName = "";
+        String modelVersion = "";
+        String modelDesc = "";
+        String modelTaskType = null;   // 取首个非空任务类型
+        List<Map<String, Object>> multiResults = new java.util.ArrayList<>();
+        boolean first = true;
+        for (EvaluationResult r : results) {
+            Map<String, Object> overall = EvalJson.toMap(r.getOverallScores());
+            Map<String, Object> category = EvalJson.toMap(r.getCategoryScores());
+            String mn = "", mv = "", md = "";
+            String mtt = null;
+            try {
+                var resp = modelClient.getVersionById(r.getModelVersionId());
+                if (resp != null && resp.isSuccess() && resp.data() != null) {
+                    Map<String, Object> v = resp.data();
+                    mn = strOr(v.get("modelName"), "");
+                    mv = strOr(v.get("version"), "");
+                    md = strOr(v.get("modelDescription"), "");
+                    mtt = strOr(v.get("taskType"), null);
+                }
+            } catch (Exception e) {
+                log.warn("[Report] 获取模型信息失败 versionId={} : {}", r.getModelVersionId(), e.getMessage());
+            }
+            if (modelTaskType == null) modelTaskType = mtt;
+            if (first) { modelName = mn; modelVersion = mv; modelDesc = md; first = false; }
+            Map<String, Object> seg = new java.util.LinkedHashMap<>();
+            seg.put("modelName", mn);
+            seg.put("modelVersion", mv);
+            seg.put("overallScores", overall);
+            seg.put("categoryScores", category);
+            multiResults.add(seg);
+        }
+
+        // —— 数据集元数据（JOIN 改造后 DatasetClient 一次返回 name/description/taskType/sampleCount）——
+        String datasetName = "";
+        String datasetDesc = "";
+        String datasetTaskType = null;
+        long datasetSampleCount = 0;   // dataset.sample_count 字段（JOIN 返回，可能未回写为 null）
+        if (task.getBenchmarkId() != null) {
+            var benchmark = benchmarkMapper.selectByIdAndTenant(task.getBenchmarkId(), tenantId);
+            if (benchmark != null && benchmark.getDatasetVersionIds() != null && !benchmark.getDatasetVersionIds().isBlank()) {
                 try {
                     java.util.List<Long> dsVersionIds = objectMapper.readValue(
                             benchmark.getDatasetVersionIds(),
@@ -397,99 +470,141 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
                     if (!dsVersionIds.isEmpty()) {
                         var dsResp = datasetClient.getVersionById(dsVersionIds.get(0));
                         if (dsResp != null && dsResp.isSuccess() && dsResp.data() != null) {
-                            Map<String, Object> dsInfo = dsResp.data();
-                            Object desc = dsInfo.get("description");
-                            if (desc != null && !desc.toString().isBlank()) {
-                                datasetDesc = desc.toString();
-                            } else {
-                                Object name = dsInfo.get("name");
-                                if (name != null && !name.toString().isBlank()) {
-                                    datasetDesc = name.toString();
-                                }
-                            }
+                            Map<String, Object> d = dsResp.data();
+                            datasetName = strOr(d.get("datasetName"), "");
+                            datasetDesc = strOr(d.get("datasetDescription"), "");
+                            datasetTaskType = strOr(d.get("taskType"), null);
+                            Object sc = d.get("sampleCount");
+                            if (sc instanceof Number) datasetSampleCount = ((Number) sc).longValue();
                         }
                     }
                 } catch (Exception e) {
-                    log.debug("[Report] 获取数据集描述失败: {}", e.getMessage());
+                    log.debug("[Report] 获取数据集信息失败: {}", e.getMessage());
                 }
             }
         }
 
-        // 构建各类别指标表
-        String classTable = buildClassMetricsTable(overallScores);
-
-        // metrics JSON
-        String metricsJson;
-        try {
-            metricsJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(overallScores);
-        } catch (Exception e) {
-            metricsJson = overallScores.toString();
+        // 样本数：① dataset.sample_count 字段优先；② 为空则从描述文本正则提取（部分数据集把数量写在 description 里）；
+        // ③ 仍无则用评测结果 sample_count（实际评测的样本量，可能为 0）
+        Integer sampleCount = datasetSampleCount > 0 ? (int) datasetSampleCount : null;
+        if (sampleCount == null) {
+            Long extracted = extractSampleCount(datasetDesc);
+            if (extracted != null) sampleCount = extracted.intValue();
         }
+        if (sampleCount == null) {
+            sampleCount = results.stream()
+                    .mapToInt(r -> r.getSampleCount() != null ? r.getSampleCount() : 0).sum();
+        }
+
+        // 指标清单：从所有 result 的 overallScores + categoryScores JSONB 顶层 key 反推（数据驱动）
+        String metricKeys = collectMetricKeys(results);
+
+        // 多模型结果 JSON
+        String multiResultsJson;
+        try {
+            multiResultsJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(multiResults);
+        } catch (Exception e) {
+            multiResultsJson = multiResults.toString();
+        }
+
+        String subtaskErrors = buildSubtaskErrors(subtasks);
+        String taskConfig = task.getConfig() != null ? task.getConfig() : "";
 
         return new ReportContext(
                 task.getName(),
-                modelName, modelVersion,
-                benchmarkName, benchmarkDesc,
-                datasetDesc, modelDesc,
+                modelName, modelVersion, modelTaskType, modelDesc,
+                benchmarkName, benchmarkDesc, benchmarkPromptTemplate, metricsConfigJson,
+                datasetName, datasetDesc, datasetTaskType,
                 task.getCompletedAt() != null ? DT_FMT.format(task.getCompletedAt()) : DT_FMT.format(Instant.now()),
-                results.isEmpty() ? 0 : results.stream()
-                        .mapToInt(r -> r.getSampleCount() != null ? r.getSampleCount() : 0).sum(),
-                metricsJson,
-                classTable
+                sampleCount,
+                metricKeys,
+                multiResultsJson,
+                subtaskErrors,
+                taskConfig
         );
     }
 
+    /** 收集所有 result 的 overallScores + categoryScores 顶层 JSON key（去重），作为指标清单喂给 LLM。 */
+    private String collectMetricKeys(List<EvaluationResult> results) {
+        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+        for (EvaluationResult r : results) {
+            Map<String, Object> overall = EvalJson.toMap(r.getOverallScores());
+            if (overall != null) keys.addAll(overall.keySet());
+            Map<String, Object> category = EvalJson.toMap(r.getCategoryScores());
+            if (category != null) keys.addAll(category.keySet());
+        }
+        return keys.isEmpty() ? "（无指标数据）" : String.join(", ", keys);
+    }
+
     /**
-     * 将系统模板 + 数据合成为最终用户提示词。
+     * 从数据集描述文本提取样本数（当 dataset.sample_count 未回写、数量写在 description 里的兜底）。
+     * 匹配 "5000 张" / "5000 个样本" / "共 5000 条" 等，取最大值（描述里多个数字时，样本总数通常最大）。
+     */
+    private static Long extractSampleCount(String description) {
+        if (description == null || description.isBlank()) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(\\d+)\\s*(张图像|个样本|条样本|条数据|张|个|条|样本|帧)"
+        ).matcher(description);
+        long best = 0;
+        while (m.find()) {
+            try {
+                long n = Long.parseLong(m.group(1));
+                if (n > best) best = n;
+            } catch (NumberFormatException ignored) {}
+        }
+        return best > 0 ? best : null;
+    }
+
+    /** 汇总子任务错误信息（失败分析依据）；无错误返回"（无错误）"。 */
+    private String buildSubtaskErrors(List<EvaluationSubtask> subtasks) {
+        if (subtasks == null || subtasks.isEmpty()) return "（无错误）";
+        StringBuilder sb = new StringBuilder();
+        for (EvaluationSubtask st : subtasks) {
+            if (st.getErrorMessage() != null && !st.getErrorMessage().isBlank()) {
+                sb.append("- modelVersionId=").append(st.getModelVersionId())
+                  .append(" status=").append(st.getStatus())
+                  .append(" error: ").append(st.getErrorMessage()).append("\n");
+            }
+        }
+        return sb.length() == 0 ? "（无错误）" : sb.toString();
+    }
+
+    /** Object → 非空 String，空则返回 fallback。 */
+    private static String strOr(Object v, String fallback) {
+        if (v == null) return fallback;
+        String s = v.toString().trim();
+        return s.isBlank() ? fallback : s;
+    }
+
+    /**
+     * 将系统模板 + 数据合成为最终用户提示词（通用占位符）。
      */
     private String buildUserPrompt(ReportContext ctx) {
         return USER_PROMPT_TEMPLATE
-                .replace("{taskName}", ctx.taskName())
-                .replace("{modelName}", ctx.modelName())
-                .replace("{modelVersion}", ctx.modelVersion())
-                .replace("{benchmarkName}", ctx.benchmarkName())
-                .replace("{benchmarkDescription}", nonNull(ctx.benchmarkDescription()))
-                .replace("{datasetDescription}", nonNull(ctx.datasetDescription()))
+                .replace("{taskName}", nonNull(ctx.taskName()))
+                .replace("{modelName}", nonNull(ctx.modelName()))
+                .replace("{modelVersion}", nonNull(ctx.modelVersion()))
+                .replace("{modelTaskType}", nonNull(ctx.modelTaskType()))
                 .replace("{modelDescription}", nonNull(ctx.modelDescription()))
-                .replace("{evalTime}", ctx.evalTime())
+                .replace("{benchmarkName}", nonNull(ctx.benchmarkName()))
+                .replace("{benchmarkDescription}", nonNull(ctx.benchmarkDescription()))
+                .replace("{metricsConfigJson}", nonNull(ctx.metricsConfigJson()))
+                .replace("{datasetName}", nonNull(ctx.datasetName()))
+                .replace("{datasetDescription}", nonNull(ctx.datasetDescription()))
+                .replace("{datasetTaskType}", nonNull(ctx.datasetTaskType()))
+                .replace("{evalTime}", nonNull(ctx.evalTime()))
                 .replace("{sampleCount}", String.valueOf(ctx.sampleCount()))
-                .replace("{metricsJson}", ctx.metricsJson())
-                .replace("{classMetricsTable}", nonNull(ctx.classMetricsTable()));
+                .replace("{metricKeys}", nonNull(ctx.metricKeys()))
+                .replace("{multiResultsJson}", nonNull(ctx.multiResultsJson()))
+                .replace("{subtaskErrors}", nonNull(ctx.subtaskErrors()))
+                .replace("{taskConfig}", nonNull(ctx.taskConfig()));
     }
 
     /**
-     * 从 confusion_matrix 构建各类别 P/R/F1 表格（Markdown 格式）。
+     * 已删除 CV-only 的 buildClassMetricsTable（从 confusion_matrix 反推 P/R/F1）。
+     * 通用化后改为把 categoryScores JSON 原样透传给 LLM（见 multiResultsJson），让 LLM 按 metricKeys 自行解读，
+     * 避免硬编码计算机视觉路径、对时序等非 CV 任务无意义。
      */
-    private String buildClassMetricsTable(Map<String, Object> scores) {
-        Object cmObj = scores.get("confusion_matrix");
-        if (!(cmObj instanceof List<?> matrix)) return "无混淆矩阵数据";
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("| 类别 | 样本数 | Precision | Recall | F1-Score |\n");
-        sb.append("|------|--------|-----------|--------|----------|\n");
-
-        int n = matrix.size();
-        for (int i = 0; i < n; i++) {
-            List<?> row = (List<?>) matrix.get(i);
-            double tp = ((Number) row.get(i)).doubleValue();  // 对角线
-            double fp = 0, fn = 0;
-            for (int j = 0; j < n; j++) {
-                if (i != j) fp += ((Number) row.get(j)).doubleValue();  // 行方向非对角 = FP
-            }
-            for (int j = 0; j < n; j++) {
-                if (i != j) fn += ((Number) ((List<?>) matrix.get(j)).get(i)).doubleValue();  // 列方向非对角 = FN
-            }
-            double prec = (tp + fp) > 0 ? tp / (tp + fp) : 0;
-            double rec = (tp + fn) > 0 ? tp / (tp + fn) : 0;
-            double f1 = (prec + rec) > 0 ? 2 * prec * rec / (prec + rec) : 0;
-            double support = 0;
-            for (int j = 0; j < n; j++) support += ((Number) row.get(j)).doubleValue();
-
-            sb.append(String.format("| 类%d | %.0f | %.4f | %.4f | %.4f |\n",
-                    i, support, prec, rec, f1));
-        }
-        return sb.toString();
-    }
 
     // ==================== LLM 调用 ====================
 
@@ -529,7 +644,7 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
                 // Ollama options
                 ObjectNode options = body.putObject("options");
                 options.put("temperature", 0.3);
-                options.put("num_predict", 4096);
+                options.put("num_predict", 8192);
                 requestBody = objectMapper.writeValueAsString(body);
             } else {
                 // ========== OpenAI Chat Completions 兼容格式 ==========
@@ -539,7 +654,7 @@ public class EvaluationReportServiceImpl implements EvaluationReportService {
                 ObjectNode body = objectMapper.createObjectNode();
                 body.put("model", cleanModel);
                 body.put("temperature", 0.3);
-                body.put("max_tokens", 4096);
+                body.put("max_tokens", 8192);
 
                 ObjectNode messages = body.putArray("messages").addObject();
                 messages.put("role", "system");

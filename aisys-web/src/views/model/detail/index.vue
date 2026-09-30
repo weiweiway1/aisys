@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElTag } from "element-plus";
+import dayjs from "dayjs";
 import {
   getModelDetail,
   getModelVersions,
@@ -42,7 +43,7 @@ const modelStatusLabel = (status?: string) => {
   }
 };
 
-const formatDate = (val?: string) => (val ? val : "-");
+const formatDate = (val?: string) => (val ? dayjs(val).format("YYYY-MM-DD HH:mm:ss") : "-");
 
 const formatBytes = (b?: number) => {
   if (b == null || Number.isNaN(b)) return "-";

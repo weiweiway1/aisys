@@ -156,6 +156,7 @@ Agent 把数据集版本对象下载到 `/data/dataset`。入口脚本按 `AISYS
 
 - [ ] 入口脚本读 `AISYS_*` 环境变量，**不硬编码**数据集/输出路径。
 - [ ] 输出严格遵守 JSONL 协议（`status`/`log`/`metric`/`result`），`result` 终态帧恰好一次。
+- [ ] **训练/评测过程中每个 epoch（或批次）emit `metric` 帧**：`{"type":"metric","step":N,"total":M,"progress":P,"metrics":{...}}`。`step` 必填（前端图表 x 轴），`metrics` 是任意 k:v（不同模型指标不同，平台按 JSONB 透传、前端动态成 series，不要硬编码 key）。若算法库本身不暴露 per-epoch 回调（如纯手写训练循环），在循环末尾手动 emit。**不 emit metric 的话前端监控页图表无数据。**
 - [ ] stdout 每行 flush；非 JSON 的算法库 print 不会破坏解析（Agent 兜底当日志）。
 - [ ] 失败时发 `result:failed` 并以非 0 退出；超大数据集不一次性读入内存。
 - [ ] Dockerfile 装齐算法库系统依赖（opencv/libgl 等）；CPU torch 与 torchvision 同源。

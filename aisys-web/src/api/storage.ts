@@ -156,8 +156,53 @@ export const downloadFile = (params: { path: string; poolId?: number }) => {
   const qs = new URLSearchParams();
   if (params.poolId) qs.set("poolId", String(params.poolId));
   qs.set("path", params.path);
-  // 使用 window.open 触发浏览器原生下载，避免 axios 拦截二进制流
-  window.open(`/api/v1/files/download?${qs.toString()}`, "_blank");
+  const url = `/api/v1/files/download?${qs.toString()}`;
+  // 不能用 window.open：浏览器原生导航不带 Authorization 头，会被安全过滤器拦截返回 401。
+  // 改用 XHR 带 token 拉 blob，再 createObjectURL 触发下载（与 uploadTaskChunk 的鉴权方式一致）。
+  const xhr = new XMLHttpRequest();
+  xhr.open("GET", url);
+  xhr.responseType = "blob";
+  const t = getToken();
+  if (t?.accessToken)
+    xhr.setRequestHeader("Authorization", formatToken(t.accessToken));
+  xhr.onload = () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      // 从 Content-Disposition 解析文件名（兼容 RFC 5987 filename* 和 legacy filename）
+      const cd = xhr.getResponseHeader("Content-Disposition") || "";
+      let fileName = params.path.split("/").pop() || "download";
+      const m1 = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+      if (m1 && m1[1]) {
+        try { fileName = decodeURIComponent(m1[1]); } catch {}
+      } else {
+        const m2 = /filename="?([^";]+)"?/i.exec(cd);
+        if (m2 && m2[1]) fileName = m2[1];
+      }
+      const blob = xhr.response as Blob;
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objUrl);
+    } else {
+      // 错误响应体可能是 JSON（如 401/404），读出来打印便于排查
+      const reader = new FileReader();
+      reader.onload = () => {
+        let msg = `HTTP ${xhr.status}`;
+        try {
+          const j = JSON.parse(reader.result as string);
+          if (j.message) msg += ` ${j.message}`;
+        } catch {}
+        console.error("[downloadFile] 下载失败:", msg, "path=", params.path);
+      };
+      reader.readAsText(xhr.response);
+    }
+  };
+  xhr.onerror = () =>
+    console.error("[downloadFile] 网络错误 path=", params.path);
+  xhr.send();
 };
 
 /** 上传单片（XHR，浏览器→后端，带进度）。后端再写 S3 part 到存储池。 */

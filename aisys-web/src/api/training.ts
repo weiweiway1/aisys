@@ -73,12 +73,9 @@ export interface TrainingLog {
 
 /** 单条训练指标 */
 export interface TrainingMetricPoint {
-  ts: number;
-  step: number;
+  ts?: number | string | null;
+  step?: number | null;
   metrics: {
-    loss?: number;
-    lr?: number;
-    accuracy?: number;
     [key: string]: any;
   };
 }

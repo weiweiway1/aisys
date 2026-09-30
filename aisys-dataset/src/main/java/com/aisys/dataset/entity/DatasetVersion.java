@@ -18,6 +18,12 @@ public class DatasetVersion {
     private Long createdBy;
     private Instant createdAt;
     private Instant updatedAt;
+    // —— 以下为 JOIN 父表 dataset 填充的瞬态字段（非 dataset_version 表列，不参与 insert/update）——
+    private String datasetName;
+    private String datasetDescription;
+    private String taskType;     // 对应 dataset.task_type（image_classification/object_detection/time_series/...）
+    private String format;       // 对应 dataset.format（jsonl/csv/json/parquet）
+    private Long sampleCount;    // 对应 dataset.sample_count
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -45,4 +51,14 @@ public class DatasetVersion {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public String getDatasetName() { return datasetName; }
+    public void setDatasetName(String datasetName) { this.datasetName = datasetName; }
+    public String getDatasetDescription() { return datasetDescription; }
+    public void setDatasetDescription(String datasetDescription) { this.datasetDescription = datasetDescription; }
+    public String getTaskType() { return taskType; }
+    public void setTaskType(String taskType) { this.taskType = taskType; }
+    public String getFormat() { return format; }
+    public void setFormat(String format) { this.format = format; }
+    public Long getSampleCount() { return sampleCount; }
+    public void setSampleCount(Long sampleCount) { this.sampleCount = sampleCount; }
 }

@@ -2,6 +2,7 @@
 import { h, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElTag, ElButton } from "element-plus";
+import dayjs from "dayjs";
 import type { FormInstance, FormRules } from "element-plus";
 import {
   getModelList,
@@ -70,7 +71,7 @@ const statusLabel = (status: ModelStatus) => {
   }
 };
 
-const formatDate = (val?: string) => (val ? val : "-");
+const formatDate = (val?: string) => (val ? dayjs(val).format("YYYY-MM-DD HH:mm:ss") : "-");
 
 const columns: TableColumnList = [
   {

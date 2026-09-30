@@ -85,6 +85,10 @@ public final class ResourceMessages {
         private Long taskId;
         private Long nodeId;
         private Map<String, Object> metrics;
+        // 训练 epoch/step（Agent 从容器 metric 帧 obj 透传），前端图表 x 轴用。
+        private Long step;
+        // 指标产生时刻（容器 emit 时刻，Agent 透传）；为空时 training 侧用入库时刻。
+        private java.time.Instant ts;
 
         @Override public String messageType() { return "TASK_METRICS"; }
         public String getTaskType() { return taskType; }
@@ -95,6 +99,10 @@ public final class ResourceMessages {
         public void setNodeId(Long nodeId) { this.nodeId = nodeId; }
         public Map<String, Object> getMetrics() { return metrics; }
         public void setMetrics(Map<String, Object> metrics) { this.metrics = metrics; }
+        public Long getStep() { return step; }
+        public void setStep(Long step) { this.step = step; }
+        public java.time.Instant getTs() { return ts; }
+        public void setTs(java.time.Instant ts) { this.ts = ts; }
     }
 
     /** 节点离线通知（notification.event） */

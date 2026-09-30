@@ -10,6 +10,7 @@ import {
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useECharts } from "@pureadmin/utils";
+import dayjs from "dayjs";
 import {
   getDatasetDetail,
   updateDataset,
@@ -573,7 +574,7 @@ onMounted(() => {
       <el-descriptions-item label="格式">{{ DatasetFormatUtil.formatLabel(detail?.format) }}</el-descriptions-item>
       <el-descriptions-item label="状态">{{ detail?.status ?? "-" }}</el-descriptions-item>
       <el-descriptions-item label="样本数">{{ formatNumber(detail?.sampleCount) }}</el-descriptions-item>
-      <el-descriptions-item label="创建时间">{{ detail?.createdAt ?? "-" }}</el-descriptions-item>
+      <el-descriptions-item label="创建时间">{{ detail?.createdAt ? dayjs(detail.createdAt).format("YYYY-MM-DD HH:mm:ss") : "-" }}</el-descriptions-item>
       <el-descriptions-item label="描述" :span="3">{{ detail?.description ?? "-" }}</el-descriptions-item>
     </el-descriptions>
 
@@ -610,7 +611,9 @@ onMounted(() => {
         <el-table-column label="行数" width="120" align="right">
           <template #default="{ row }">{{ formatNumber(row.rowCount) }}</template>
         </el-table-column>
-        <el-table-column label="创建时间" prop="createdAt" width="180" />
+        <el-table-column label="创建时间" prop="createdAt" width="180">
+          <template #default="{ row }">{{ row.createdAt ? dayjs(row.createdAt).format("YYYY-MM-DD HH:mm:ss") : "-" }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small"

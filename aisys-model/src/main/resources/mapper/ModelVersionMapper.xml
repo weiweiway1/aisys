@@ -15,6 +15,11 @@
         <result property="createdBy"   column="created_by"/>
         <result property="createdAt"   column="created_at"/>
         <result property="updatedAt"   column="updated_at"/>
+        <!-- JOIN 父表 model 填充的瞬态字段（仅 selectById 等带 JOIN 的查询会赋值，其余为 null） -->
+        <result property="modelName"        column="model_name"/>
+        <result property="modelDescription" column="model_description"/>
+        <result property="taskType"          column="model_type"/>
+        <result property="framework"        column="model_framework"/>
     </resultMap>
 
     <sql id="cols">
@@ -23,7 +28,13 @@
     </sql>
 
     <select id="selectById" resultMap="versionMap">
-        SELECT <include refid="cols"/> FROM model_version WHERE id = #{id}
+        SELECT v.id, v.model_id, v.tenant_id, v.version, v.storage_path, v.file_size,
+               v.checksum, v.status, v.config::text AS config, v.created_by, v.created_at, v.updated_at,
+               m.name AS model_name, m.description AS model_description,
+               m.type AS model_type, m.framework AS model_framework
+        FROM model_version v
+        LEFT JOIN model m ON m.id = v.model_id
+        WHERE v.id = #{id}
     </select>
 
     <select id="selectByModelAndVersion" resultMap="versionMap">

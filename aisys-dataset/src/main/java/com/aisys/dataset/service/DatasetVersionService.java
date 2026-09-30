@@ -452,7 +452,8 @@ public class DatasetVersionService {
                 v.getId(), v.getDatasetId(), v.getVersion(), v.getStoragePath(),
                 v.getFileSize(), v.getChecksum(), v.getRowCount(),
                 parseColumnInfo(v.getColumnInfo()), v.getStatus(),
-                v.getCreatedBy(), v.getCreatedAt(), v.getUpdatedAt()
+                v.getCreatedBy(), v.getCreatedAt(), v.getUpdatedAt(),
+                v.getDatasetName(), v.getDatasetDescription(), v.getTaskType(), v.getFormat(), v.getSampleCount()
         );
     }
 }

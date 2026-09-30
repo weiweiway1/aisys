@@ -147,12 +147,17 @@ func (e *Executor) runModelContainer(cmd *Command, agent *Agent) {
 	}
 
 	name := fmt.Sprintf("task-%d", cmd.TaskID)
-	args := []string{"run", "--rm", "-t", "--name", name,
+	// 不用 -t：分配 TTY 会让 tqdm/ultralytics 误判为交互终端，用 \r 原地刷新进度条，
+	// bufio.Scanner 只按 \n 分割会把所有 \r-刷新累积成单行突破 buffer 上限（ErrTooLong），
+	// scanner 静默退出后后续 stdout（log/metric/result 帧）全部丢失。
+	// TQDM_DISABLE=1 双保险：即使容器内 isatty 误判，tqdm 也不输出进度条。
+	args := []string{"run", "--rm", "--name", name,
 		"-v", effectiveDatasetDir + ":/data/dataset" + datasetRoRw,
 		"-v", outputDir + ":/output",
 		"-e", "AISYS_DATASET_DIR=/data/dataset",
 		"-e", "AISYS_OUTPUT_DIR=/output",
 		"-e", "PYTHONUNBUFFERED=1",
+		"-e", "TQDM_DISABLE=1",
 	}
 	if datasetMode == "split" {
 		args = append(args, "-e", "AISYS_DATASET_FORMAT=split")
@@ -184,24 +189,76 @@ func (e *Executor) runModelContainer(cmd *Command, agent *Agent) {
 	}
 	e.runDockerAndStream(cmd, agent, imageName, args, true)
 
-	// 训练产物回传：容器退出后、defer 删除 workDir 之前，把 best.pt PUT 到平台预签名 URL，
-	// 否则 best.pt 随 workDir 一起被清理，训练成果无法落盘（仅 TRAINING，平台仅对此下发 outputUploadUrl）。
+	// 训练产物回传：容器退出后、defer 删除 workDir 之前，把最佳权重 PUT 到平台预签名 URL，
+	// 否则权重文件随 workDir 一起被清理，训练成果无法落盘（仅 TRAINING，平台仅对此下发 outputUploadUrl）。
+	// 不同算法库的权重命名/路径各异（best.pt / best.pth / runs/.../weights/best.pt / model.safetensors），
+	// 用 findBestWeight 扫描整个 /output 挑选权重文件，避免硬编码 best.pt 漏抓。
+	// 落盘 S3 key 固定为 training/{taskId}/output/best.pt（与 resource 预签名 URL 对应），前端按此路径下载。
 	if cmd.OutputUploadUrl != "" {
-		best := filepath.Join(outputDir, "best.pt")
-		if _, err := os.Stat(best); err == nil {
-			if err := uploadFile(cmd.OutputUploadUrl, best); err != nil {
-				log.Printf("[agent] 上传训练产物失败 taskId=%d: %v", cmd.TaskID, err)
-			} else {
-				log.Printf("[agent] 已上传训练产物 best.pt taskId=%d", cmd.TaskID)
-				agent.send(Report{Type: "status", TaskID: cmd.TaskID, TaskType: cmd.TaskType, Data: map[string]any{
-					"status": "completed", "progress": 100, "outputUploaded": true,
-					"outputPath": fmt.Sprintf("training/%d/output/best.pt", cmd.TaskID),
-				}})
-			}
+		best := findBestWeight(outputDir)
+		if best == "" {
+			log.Printf("[agent] 未找到权重文件 taskId=%d（扫描 %s 无 .pt/.pth/.onnx/.safetensors/.bin）", cmd.TaskID, outputDir)
+		} else if err := uploadFile(cmd.OutputUploadUrl, best); err != nil {
+			log.Printf("[agent] 上传训练产物失败 taskId=%d file=%s: %v", cmd.TaskID, filepath.Base(best), err)
 		} else {
-			log.Printf("[agent] 无 best.pt 可上传 taskId=%d（路径 %s）", cmd.TaskID, best)
+			log.Printf("[agent] 已上传训练产物 taskId=%d file=%s", cmd.TaskID, filepath.Base(best))
+			agent.send(Report{Type: "status", TaskID: cmd.TaskID, TaskType: cmd.TaskType, Data: map[string]any{
+				"status": "completed", "progress": 100, "outputUploaded": true,
+				"outputPath": fmt.Sprintf("training/%d/output/best.pt", cmd.TaskID),
+			}})
 		}
 	}
+}
+
+// findBestWeight 在 outputDir（含子目录）中查找最佳权重文件。
+// 不同算法库命名/路径各异（best.pt / best.pth / runs/.../weights/best.pt / model.safetensors），
+// 硬编码 best.pt 会漏掉，故扫描整个输出目录按评分挑选。返回空字符串表示未找到。
+func findBestWeight(outputDir string) string {
+	if info, err := os.Stat(outputDir); err != nil || !info.IsDir() {
+		return ""
+	}
+	type cand struct {
+		path string
+		name string
+		pref int
+	}
+	var cands []cand
+	_ = filepath.Walk(outputDir, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(info.Name()))
+		pref := 0
+		switch ext {
+		case ".pt", ".pth":
+			pref = 3
+		case ".safetensors":
+			pref = 2
+		case ".onnx", ".bin", ".h5", ".pkl", ".ckpt":
+			pref = 1
+		default:
+			return nil
+		}
+		cands = append(cands, cand{path: p, name: info.Name(), pref: pref})
+		return nil
+	})
+	bestIdx := -1
+	var bestScore int
+	for i, c := range cands {
+		score := c.pref
+		if strings.Contains(strings.ToLower(c.name), "best") {
+			score += 100 // 优先选名字含 best 的权重
+		}
+		score -= len(c.path) / 10 // 路径越短（越靠近根目录）越优先
+		if bestIdx == -1 || score > bestScore {
+			bestIdx = i
+			bestScore = score
+		}
+	}
+	if bestIdx == -1 {
+		return ""
+	}
+	return cands[bestIdx].path
 }
 
 // runSim：旧路径回退（内置 CPU 模拟脚本，step 行协议）。
@@ -252,7 +309,9 @@ func (e *Executor) runDockerAndStream(cmd *Command, agent *Agent, image string, 
 	}()
 
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	// 上限 64MB：防御性兜底（去掉 -t 后单行不应再累积超长，但容器可能输出大 traceback/JSON）。
+	// 之前 4MB 被 tqdm 累积行突破，scanner 报 ErrTooLong 退出，后续 stdout 全丢。
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	var result map[string]any
 	for scanner.Scan() {
 		line := cleanLogLine(scanner.Text())
@@ -275,6 +334,12 @@ func (e *Executor) runDockerAndStream(cmd *Command, agent *Agent, image string, 
 				}
 			}
 		}
+	}
+
+	// scanner 退出可能是 ErrTooLong（单行超 buffer）或读管道错误；之前静默吞掉，
+	// 导致容器后续 stdout 全丢、log/metric/result 帧都不上报。这里暴露出来便于排查。
+	if err := scanner.Err(); err != nil {
+		log.Printf("[agent] stdout scanner 错误 taskId=%d: %v", cmd.TaskID, err)
 	}
 
 	err = dockerCmd.Wait()
@@ -317,14 +382,18 @@ func (e *Executor) handleJsonlLine(line string, cmd *Command, agent *Agent) map[
 	case "status":
 		agent.send(Report{Type: "status", TaskID: cmd.TaskID, TaskType: cmd.TaskType, Data: obj})
 	case "log":
+		// 不带 Data:obj——resource forwardLog 只读 level/message，Data 会携带未截断的原始 message，
+		// 长 ERROR 帧（带 traceback）可能超 WS 文本上限触发 close 1009。Message 已 cleanLogLine 截断。
 		agent.send(Report{Type: "log", TaskID: cmd.TaskID, TaskType: cmd.TaskType,
-			Level: strOr(obj, "level", "INFO"), Message: cleanLogLine(strOr(obj, "message", "")), Data: obj})
+			Level: strOr(obj, "level", "INFO"), Message: cleanLogLine(strOr(obj, "message", ""))})
 	case "metric":
 		m, _ := obj["metrics"].(map[string]any)
 		if m == nil {
 			m = map[string]any{}
 		}
-		agent.send(Report{Type: "metrics", TaskID: cmd.TaskID, TaskType: cmd.TaskType, Metrics: m})
+		// Data: obj 透传整个 metric 帧（含 step/progress/total），resource 据此填 TaskMetricsMessage.step。
+		// Metrics 字段保留给 resource forwardMetrics 直接读 msg.metrics()。
+		agent.send(Report{Type: "metrics", TaskID: cmd.TaskID, TaskType: cmd.TaskType, Metrics: m, Data: obj})
 		// 兼容：把 progress 也作为 status 帧上报，便于平台更新进度
 		if p, ok := obj["progress"].(float64); ok {
 			agent.send(Report{Type: "status", TaskID: cmd.TaskID, TaskType: cmd.TaskType,
@@ -452,7 +521,10 @@ func uploadFile(url, src string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	// 大权重文件可能几十~几百 MB，给 10 分钟上限，避免 SeaweedFS 不可达时无限挂起
+	// （挂起会导致 task goroutine 泄漏、第二个 status 上报永不发出，前端无下载按钮）。
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -662,12 +734,23 @@ func parseStep(line string) map[string]any {
 }
 
 func cleanLogLine(line string) string {
-	return strings.Map(func(r rune) rune {
+	s := strings.Map(func(r rune) rune {
 		if r < 32 && r != '\t' && r != '\n' && r != '\r' {
 			return -1
 		}
 		return r
 	}, ansiEscapeRE.ReplaceAllString(line, ""))
+	// tqdm/ultralytics 进度条用 \r 原地刷新，多次更新被 bufio.Scanner（只按 \n 分割）串成一行。
+	// 取最后一个 \r 段（最新进度状态），避免一行日志累积成超长字符串、也避免 \r 在前端造成渲染错乱。
+	if idx := strings.LastIndex(s, "\r"); idx >= 0 {
+		s = s[idx+1:]
+	}
+	// 仍可能产生超长行（如长 traceback），截断到合理长度避免 WS close 1009。按 rune 截断避免切断多字节字符。
+	const maxRunes = 2000
+	if r := []rune(s); len(r) > maxRunes {
+		s = string(r[:maxRunes]) + "…(truncated, " + strconv.Itoa(len(r)) + " runes total)"
+	}
+	return s
 }
 
 func strOr(m map[string]any, key, def string) string {

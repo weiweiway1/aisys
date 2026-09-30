@@ -127,6 +127,26 @@ public class ForwardServiceImpl implements ForwardService {
         if ((storagePath == null || storagePath.isBlank()) && Boolean.TRUE.equals(uploaded)) {
             storagePath = "training/" + msg.taskId() + "/output/best.pt";
         }
+        // 容器 result 帧声明了 weights（如 "/output/best.pt"）说明已产出权重；Agent 会把它 PUT 到
+        // 规范 S3 key training/{taskId}/output/best.pt（resource 预签名下发）。即使 Agent 的第二个
+        // status 上报（带 outputPath）丢失或上传失败，也据此先写 checkpoint，让前端出现下载按钮；
+        // 若上传实际未成功，下载时会 404（此时用户报错，再排查 Agent 上传/S3 链路）。
+        // 数据嵌套：Agent reportTerminal 把容器整个 result 帧包进 data.result，故 weights 在
+        // data.result.result.weights；extractLoss 同样按双层处理。
+        if (storagePath == null || storagePath.isBlank()) {
+            Object resultObj = data.get("result");
+            if (resultObj instanceof java.util.Map<?, ?> rm) {
+                Object weights = null;
+                Object innerResult = rm.get("result");
+                if (innerResult instanceof java.util.Map<?, ?> im) {
+                    weights = im.get("weights");
+                }
+                if (weights == null) weights = rm.get("weights"); // 兜底
+                if (weights != null && !String.valueOf(weights).isBlank()) {
+                    storagePath = "training/" + msg.taskId() + "/output/best.pt";
+                }
+            }
+        }
         if (storagePath == null || storagePath.isBlank()) return;
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("storagePath", storagePath);
@@ -193,6 +213,11 @@ public class ForwardServiceImpl implements ForwardService {
         m.setTaskId(msg.taskId());
         m.setNodeId(node == null ? null : node.getId());
         m.setMetrics(msg.metrics());
+        // Agent metric 帧把整个 obj 透传到 Data（含 step/progress/total），这里提取 step 给前端图表 x 轴。
+        java.util.Map<String, Object> d = msg.data();
+        if (d != null) {
+            m.setStep(asLong(d.get("step")));
+        }
         publish(m, CommonConstants.EXCHANGE_TASK_METRICS,
                 ResourceConstants.ROUTING_KEY_TASK_METRICS_PREFIX + lower(msg.taskType()),
                 msg);

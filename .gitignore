@@ -3,3 +3,6 @@ node_modules/
 target/
 dist/
 *.tar
+
+# 本地环境配置（含 LLM API key 等密钥，勿提交；.env.example 是可提交的模板）
+deploy/.env

@@ -179,7 +179,14 @@ services:
   evaluation:
     build: { context: .., dockerfile: docker/evaluation/Dockerfile }
     restart: unless-stopped
-    environment: { <<: *backend-env, JAVA_XMX: "288m" }
+    environment:
+      <<: *backend-env
+      JAVA_XMX: "288m"
+      # LLM 评测报告生成配置（值来自 deploy/.env；改 .env 后 `docker compose up -d evaluation` 即生效，无需 --build）
+      LLM_URL: ${LLM_URL:-http://host.docker.internal:11434/api/generate}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-qwen2:latest}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
     env_file: [./secrets/jwt.env]
     extra_hosts:
       - "host.docker.internal:host-gateway"
