@@ -30,10 +30,14 @@ import {
   initiateUploadTask,
   uploadTaskChunk,
   completeUploadTask,
+  listUploadTasks,
+  getUploadTask,
   UPLOAD_CHUNK_SIZE
 } from "@/api/storage";
+import { uploadMissingParts } from "@/utils/resumableUpload";
 import { getToken, formatToken } from "@/utils/auth";
 import { DatasetFormatUtil, taskTypeLabel } from "@/utils/datasetFormats";
+import TimeSeriesPreview from "./components/TimeSeriesPreview.vue";
 
 defineOptions({ name: "DatasetDetail" });
 
@@ -44,6 +48,7 @@ const datasetId = computed(() => String(route.params.id));
 
 const loading = ref(false);
 const detail = ref<DatasetItem | null>(null);
+const isTimeSeries = computed(() => detail.value?.taskType === "time_series");
 
 const versions = ref<DatasetVersion[]>([]);
 const versionsLoading = ref(false);
@@ -55,6 +60,7 @@ const previewQuery = reactive({ page: 1, size: 10 });
 const previewTotal = ref(0);
 
 const statistics = ref<any>(null);
+const isArchiveDataset = computed(() => statistics.value?.totalSize != null && statistics.value?.fileSize != null && statistics.value.totalSize !== statistics.value.fileSize);
 
 // 预览图片：后端 row.url 是占位路径，前端用鉴权 blob 取真实图片并转 objectURL；用完需 revoke 防泄漏。
 const previewImageUrls = ref<Record<number, string>>({});
@@ -75,13 +81,13 @@ const formatNumber = (val?: number) =>
 const formatBytes = (b?: number) => {
   if (b == null || Number.isNaN(b)) return "-";
   if (b === 0) return "0 B";
-  const u = ["B", "KB", "MB", "GB", "TB"];
+  const u = ["B", "KiB", "MiB", "GiB", "TiB"];
   const i = Math.min(u.length - 1, Math.floor(Math.log(b) / Math.log(1024)));
   return `${(b / Math.pow(1024, i)).toFixed(2)} ${u[i]}`;
 };
 
 /** 版本状态 → 中文文案 + tag 类型 */
-const versionStatusMeta = (s?: string) => {
+const versionStatusMeta = (s?: string): { type: "success" | "warning" | "info"; text: string } => {
   switch ((s || "").toUpperCase()) {
     case "READY":
       return { type: "success", text: "就绪" };
@@ -160,7 +166,14 @@ const revokePreviewImages = () => {
 };
 
 const fetchPreview = async () => {
-  if (!currentVersionId.value) {
+  if (isTimeSeries.value) {
+    previewData.value = null;
+    previewTotal.value = 0;
+    isImageDataset.value = false;
+    return;
+  }
+  if (!currentVersionId.value || versions.value.find(v => v.id === currentVersionId.value)?.status !== "ready") {
+    revokePreviewImages();
     previewData.value = null;
     isImageDataset.value = false;
     return;
@@ -200,22 +213,24 @@ const fetchPreview = async () => {
       // 逐行用鉴权 blob 取真实图片（row.id 为全局 1 基下标 → 端点 0 基 = id-1）
       // 经 previewData.value.rows[pageIdx] 走响应式代理赋值，确保 <el-image> 重渲染
       if (isImageDataset.value) {
-        await Promise.all(
-          rows.map(async (row, pageIdx) => {
-            const globalIdx = Number(row.id) - 1;
-            const blobUrl = await getSampleImageBlob(
-              datasetId.value,
-              currentVersionId.value,
-              globalIdx
-            );
+        const displayedPreview = previewData.value;
+        const selectedVersion = currentVersionId.value;
+        const indices = rows.keys();
+        await Promise.all(Array.from({ length: Math.min(2, rows.length) }, async () => {
+          for (const pageIdx of indices) {
+            if (previewData.value !== displayedPreview) return;
+            const globalIdx = Number(rows[pageIdx].id) - 1;
+            const blobUrl = await getSampleImageBlob(datasetId.value, selectedVersion, globalIdx);
             if (blobUrl) {
-              previewImageUrls.value[globalIdx] = blobUrl;
-              if (previewData.value?.rows?.[pageIdx]) {
-                previewData.value.rows[pageIdx].url = blobUrl;
+              if (previewData.value !== displayedPreview) {
+                URL.revokeObjectURL(blobUrl);
+                return;
               }
+              previewImageUrls.value[globalIdx] = blobUrl;
+              displayedPreview.rows[pageIdx].url = blobUrl;
             }
-          })
-        );
+          }
+        }));
       }
     } else {
       ElMessage.error(res?.message || "获取预览失败");
@@ -246,11 +261,11 @@ const pieOption = (dist: any) => {
     value: value as number
   }));
   return {
-    tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+    tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
     color: PIE_COLORS,
     series: [
       {
-        type: "pie",
+        type: "pie" as const,
         radius: ["40%", "70%"],
         center: ["50%", "55%"],
         label: { formatter: "{b}\n{d}%", fontSize: 12 },
@@ -270,7 +285,7 @@ const renderStatsCharts = () => {
 };
 
 const fetchStatistics = async () => {
-  if (!currentVersionId.value) {
+  if (!currentVersionId.value || versions.value.find(v => v.id === currentVersionId.value)?.status !== "ready") {
     statistics.value = null;
     return;
   }
@@ -347,8 +362,12 @@ const submitEdit = async () => {
 const uploadVisible = ref(false);
 const uploadForm = reactive({ version: "", description: "", file: null as File | null });
 const uploading = ref(false);
-const openUpload = () => {
-  uploadForm.version = "";
+const resumeVersion = ref<DatasetVersion | null>(null);
+const openUpload = (row?: DatasetVersion) => {
+  resumeVersion.value = row ?? null;
+  uploadProgress.value = 0;
+  uploadStatusText.value = "";
+  uploadForm.version = row?.version ?? "";
   uploadForm.description = "";
   uploadForm.file = null;
   uploadVisible.value = true;
@@ -376,50 +395,71 @@ const submitUpload = async () => {
 
   try {
     if (file.size > UPLOAD_CHUNK_SIZE) {
-      // 大文件：分片上传（浏览器→存储后端→存储池）
-      // 1. 创建版本（status=creating，返回 storagePath）
-      const init: any = await createDatasetVersion(datasetId.value, { version, description: uploadForm.description });
-      if (!init || init.code !== 0) throw new Error(init?.message || "创建版本失败");
-      const versionId = init.data.id;
-      const storagePath = init.data.storagePath;
-
-      // 2. 发起分片上传任务（经存储后端）
-      uploadStatusText.value = "发起分片上传任务...";
-      const task: any = await initiateUploadTask({
-        poolId: 1, path: storagePath, fileName: file.name, size: file.size, chunkSize: UPLOAD_CHUNK_SIZE
-      });
-      if (!task || task.code !== 0) throw new Error(task?.message || "发起上传任务失败");
-      const taskId = task.data.taskId;
-      const totalChunks = task.data.totalChunks;
-
-      // 3. 并发上传分片
-      const loaded = new Array(totalChunks).fill(0);
-      const updateProgress = () => {
-        const sum = loaded.reduce((a, b) => a + b, 0);
-        uploadProgress.value = Math.min(100, Math.round((sum / file.size) * 100));
-      };
-      let nextIdx = 0;
-      let completed = 0;
-      uploadStatusText.value = `上传中 0/${totalChunks}`;
-      const worker = async () => {
-        while (true) {
-          const idx = nextIdx++;
-          if (idx >= totalChunks) break;
-          const start = idx * UPLOAD_CHUNK_SIZE;
-          const end = Math.min(start + UPLOAD_CHUNK_SIZE, file.size);
-          const blob = file.slice(start, end);
-          const res: any = await uploadTaskChunk(taskId, idx + 1, blob, l => {
-            loaded[idx] = l;
-            updateProgress();
-          });
-          if (!res || res.code !== 0) throw new Error(res?.message || `第 ${idx + 1} 片上传失败`);
-          loaded[idx] = end - start;
-          updateProgress();
-          completed++;
-          uploadStatusText.value = `上传中 ${completed}/${totalChunks}`;
+      // Reuse a pending version and its authoritative server-side part list.
+      const versionResult: any = await getDatasetVersions(datasetId.value);
+      if (versionResult?.code !== 0) throw new Error(versionResult?.message || "读取版本失败");
+      const versionItems = Array.isArray(versionResult.data) ? versionResult.data : versionResult.data?.items ?? [];
+      const existing = versionItems.find((v: DatasetVersion) => v.version === version);
+      let versionId: string | number;
+      let storagePath: string;
+      let taskData: any;
+      if (existing) {
+        if (existing.status !== "creating") throw new Error("该版本已存在，请使用新版本号");
+        versionId = existing.id;
+        storagePath = existing.storagePath;
+        let page = 1;
+        while (!taskData) {
+          const result: any = await listUploadTasks({ page, size: 100 });
+          if (result?.code !== 0) throw new Error(result?.message || "读取上传任务失败");
+          const items = result.data?.items ?? [];
+          const candidate = items.find((t: any) => t.path === storagePath && ["UPLOADING", "COMPLETED"].includes(t.status));
+          if (candidate) {
+            if (candidate.size !== file.size || candidate.fileName !== file.name) {
+              throw new Error("文件名或大小不匹配，请选择上次上传的同一个原始文件");
+            }
+            const result: any = await getUploadTask(candidate.id);
+            if (result?.code !== 0) throw new Error(result?.message || "读取上传进度失败");
+            taskData = result.data;
+            break;
+          }
+          if (items.length < 100) break;
+          page++;
         }
-      };
-      await Promise.all(Array.from({ length: Math.min(3, totalChunks) }, () => worker()));
+      } else {
+        const init: any = await createDatasetVersion(datasetId.value, { version, description: uploadForm.description });
+        if (init?.code !== 0) throw new Error(init?.message || "创建版本失败");
+        versionId = init.data.id;
+        storagePath = init.data.storagePath;
+      }
+      if (!taskData) {
+        const task: any = await initiateUploadTask({
+          poolId: detail.value?.storagePoolId ?? 1,
+          path: storagePath, fileName: file.name, size: file.size, chunkSize: UPLOAD_CHUNK_SIZE
+        });
+        if (task?.code !== 0) throw new Error(task?.message || "发起上传任务失败");
+        taskData = { ...task.data, id: task.data.taskId, receivedPartNumbers: [] };
+      }
+      const taskId = taskData.id;
+      if (taskData.status === "UPLOADING") {
+        if (!Array.isArray(taskData.receivedPartNumbers)) throw new Error("服务端尚未支持续传，请稍后重试");
+        await uploadMissingParts({
+          file,
+          chunkSize: taskData.chunkSize,
+          totalChunks: taskData.totalChunks,
+          receivedPartNumbers: taskData.receivedPartNumbers,
+          send: async (part, blob, progress) => {
+            const res: any = await uploadTaskChunk(taskId, part, blob, progress);
+            if (res?.code !== 0) {
+              throw Object.assign(new Error(res?.message || "上传失败"), { retryable: false });
+            }
+          },
+          progress: (percent, completed) => {
+            uploadProgress.value = percent;
+            uploadStatusText.value = `已接收 ${completed}/${taskData.totalChunks} 片`;
+          },
+          retry: (part, attempt) => { uploadStatusText.value = `第 ${part} 片正在重试（${attempt}/2）`; }
+        });
+      }
 
       // 4. 完成分片上传（后端组装入池）
       uploadStatusText.value = "后端写入存储池中...";
@@ -447,9 +487,11 @@ const submitUpload = async () => {
     }
     ElMessage.success("上传成功");
     uploadVisible.value = false;
-    fetchVersions();
+    currentVersionId.value = "";
+    await Promise.all([fetchDetail(), fetchVersions()]);
   } catch (e: any) {
-    ElMessage.error(e?.message || "上传失败");
+    uploadStatusText.value = e?.message || "上传失败，已上传分片已保留";
+    ElMessage.error(uploadStatusText.value);
   } finally {
     uploading.value = false;
   }
@@ -524,7 +566,7 @@ const kpiList = computed<{ label: string; value: string; unit?: string }[]>(() =
   if (!s) return [];
   const items: { label: string; value: string; unit?: string }[] = [];
   if (s.sampleCount != null) items.push({ label: "样本数", value: formatNumber(s.sampleCount) });
-  if (s.totalSize != null) items.push({ label: "总大小", value: formatBytes(s.totalSize) });
+  if (s.totalSize != null) items.push({ label: isImageDataset.value || isArchiveDataset.value ? "解压后大小" : "总大小", value: formatBytes(s.totalSize) });
   if (s.classesCount != null) items.push({ label: "类别数", value: formatNumber(s.classesCount) });
   if (s.totalAnnotations != null) items.push({ label: "标注总数", value: formatNumber(s.totalAnnotations) });
   if (s.avgAnnotationsPerSample != null)
@@ -542,7 +584,7 @@ const classDistList = computed(() => {
   }));
   const total = entries.reduce((s, e) => s + e.count, 0);
   return entries
-    .map(e => ({ ...e, percent: total > 0 ? Math.round((e.count / total) * 100) : 0 }))
+    .map(e => ({ ...e, percent: total > 0 ? Math.round((e.count / total) * 1000) / 10 : 0 }))
     .sort((a, b) => b.count - a.count);
 });
 
@@ -587,7 +629,7 @@ onMounted(() => {
           <el-select v-model="downloadFormat" size="small" style="width: 140px">
             <el-option v-for="o in formatOptions" :key="o.value" :label="o.label" :value="o.value" />
           </el-select>
-          <el-button v-perms="['dataset:create']" type="primary" size="small" @click="openUpload">
+          <el-button v-perms="['dataset:create']" type="primary" size="small" @click="openUpload()">
             上传新版本
           </el-button>
         </div>
@@ -608,22 +650,24 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="行数" width="120" align="right">
+        <el-table-column label="样本数" width="120" align="right">
           <template #default="{ row }">{{ formatNumber(row.rowCount) }}</template>
         </el-table-column>
         <el-table-column label="创建时间" prop="createdAt" width="180">
           <template #default="{ row }">{{ row.createdAt ? dayjs(row.createdAt).format("YYYY-MM-DD HH:mm:ss") : "-" }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="290" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small"
+            <el-button v-if="row.status === 'creating'" v-perms="['dataset:create']" link type="primary" size="small"
+              @click.stop="openUpload(row as DatasetVersion)">继续上传</el-button>
+            <el-button link type="primary" size="small" :disabled="row.status !== 'ready'"
               @click.stop="currentVersionId = row.id; handleVersionChange()">预览</el-button>
             <el-button
               link type="primary" size="small" :loading="downloadingId === row.id"
               :disabled="row.status !== 'ready'"
-              @click.stop="downloadVersion(row)">下载</el-button>
+              @click.stop="downloadVersion(row as DatasetVersion)">下载</el-button>
             <el-button v-perms="['dataset:delete']" link type="danger" size="small"
-              @click.stop="deleteVersion(row)">删除</el-button>
+              @click.stop="deleteVersion(row as DatasetVersion)">删除</el-button>
           </template>
         </el-table-column>
         <template #empty><span>暂无版本（点击「上传新版本」）</span></template>
@@ -634,11 +678,14 @@ onMounted(() => {
     <div class="section">
       <div class="section-title">
         数据预览
-        <span v-if="currentVersionId" class="version-tag">版本：{{ currentVersionId }}</span>
+        <span v-if="currentVersionId" class="version-tag">版本：{{ versions.find(v => v.id === currentVersionId)?.version }}</span>
       </div>
 
       <!-- 图片网格（检测/分类） -->
-      <div v-if="isImageDataset" v-loading="previewLoading" class="image-grid">
+      <TimeSeriesPreview v-if="isTimeSeries && currentVersionId && versions.find(v => v.id === currentVersionId)?.status === 'ready'"
+        :key="`${datasetId}-${currentVersionId}`" :dataset-id="datasetId" :version-id="currentVersionId"
+        :description="detail?.description" :statistics="statistics" />
+      <div v-else-if="isImageDataset" v-loading="previewLoading" class="image-grid">
         <div v-for="row in previewData?.rows ?? []" :key="row.id" class="image-card">
           <el-image
             v-if="row.url"
@@ -653,7 +700,7 @@ onMounted(() => {
             <div class="image-file" :title="row.file">{{ row.file }}</div>
             <div class="image-sub">
               {{ row.width }}×{{ row.height }}
-              <span v-if="row.annotations !== undefined">· {{ row.annotations }} 标注</span>
+              <span v-if="detail?.taskType === 'object_detection' && row.annotations !== undefined">· {{ row.annotations }} 标注</span>
               <span v-if="row.split">· {{ row.split }}</span>
             </div>
           </div>
@@ -668,7 +715,7 @@ onMounted(() => {
           :prop="col.field" :label="col.label || col.field" min-width="140" show-overflow-tooltip />
         <template #empty><span>暂无预览数据</span></template>
       </el-table>
-      <div class="pagination-wrapper" v-if="previewTotal > 0">
+      <div class="pagination-wrapper" v-if="!isTimeSeries && previewTotal > 0">
         <el-pagination v-model:current-page="previewQuery.page" v-model:page-size="previewQuery.size"
           :total="previewTotal" :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper" background
@@ -680,7 +727,7 @@ onMounted(() => {
     <div class="section stats-section">
       <div class="section-title">
         统计信息
-        <span v-if="currentVersionId" class="version-tag">版本：{{ currentVersionId }}</span>
+        <span v-if="currentVersionId" class="version-tag">版本：{{ versions.find(v => v.id === currentVersionId)?.version }}</span>
       </div>
 
       <el-empty v-if="!statistics" description="暂无统计信息" :image-size="80" />
@@ -713,7 +760,7 @@ onMounted(() => {
         <!-- 类别分布 + 其他信息（双栏卡片） -->
         <div class="stats-detail-row">
           <div v-if="classDistList.length" class="stats-card">
-            <p class="card-title">类别分布（Top {{ classDistList.length }}）</p>
+            <p class="card-title">类别分布（{{ classDistList.length }} 类）</p>
             <div class="class-list">
               <div v-for="item in classDistList" :key="item.label" class="class-item">
                 <div class="class-head">
@@ -733,9 +780,9 @@ onMounted(() => {
           <div class="stats-card">
             <p class="card-title">其他信息</p>
             <el-descriptions :column="1" size="small" border>
-              <el-descriptions-item label="行数">{{ formatNumber(statistics?.rowCount) }}</el-descriptions-item>
-              <el-descriptions-item label="文件大小">{{ formatBytes(statistics?.fileSize) }}</el-descriptions-item>
-              <el-descriptions-item label="列数">{{ columnList.length }}</el-descriptions-item>
+              <el-descriptions-item :label="isImageDataset || isTimeSeries ? '样本数' : '行数'">{{ formatNumber(statistics?.rowCount) }}</el-descriptions-item>
+              <el-descriptions-item :label="isImageDataset || isArchiveDataset ? '压缩包大小' : '文件大小'">{{ formatBytes(statistics?.fileSize) }}</el-descriptions-item>
+              <el-descriptions-item v-if="!isImageDataset" label="列数">{{ columnList.length }}</el-descriptions-item>
               <el-descriptions-item label="校验值">
                 <span v-if="statistics?.checksum" class="checksum">{{ statistics.checksum }}</span>
                 <span v-else>-</span>
@@ -767,17 +814,19 @@ onMounted(() => {
     </el-dialog>
 
     <!-- 上传新版本 -->
-    <el-dialog v-model="uploadVisible" title="上传新版本" width="520px" destroy-on-close>
+    <el-dialog v-model="uploadVisible" :title="resumeVersion ? '继续上传' : '上传新版本'" width="520px" destroy-on-close
+      :close-on-click-modal="!uploading" :close-on-press-escape="!uploading" :show-close="!uploading">
+      <el-alert v-if="resumeVersion" title="请选择上次上传的同一个原始文件，只会补传缺失分片。" type="info" :closable="false" class="mb-4" />
       <el-form label-width="80px">
         <el-form-item label="版本号">
-          <el-input v-model="uploadForm.version" placeholder="例如 v1.0" />
+          <el-input v-model="uploadForm.version" :disabled="uploading || !!resumeVersion" placeholder="例如 v1.0" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="uploadForm.description" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item label="文件">
-          <el-upload :auto-upload="false" :limit="1" :on-change="onFileChange" :show-file-list="true">
-            <el-button type="primary">选择文件（JSONL）</el-button>
+          <el-upload :auto-upload="false" :limit="1" :disabled="uploading" :on-change="onFileChange" :on-remove="() => uploadForm.file = null" :show-file-list="true">
+            <el-button type="primary">选择数据集文件</el-button>
           </el-upload>
         </el-form-item>
       </el-form>
@@ -792,7 +841,7 @@ onMounted(() => {
         <p class="text-xs text-gray-400">大文件（>50MB）自动启用分片上传</p>
       </div>
       <template #footer>
-        <el-button @click="uploadVisible = false">取消</el-button>
+        <el-button :disabled="uploading" @click="uploadVisible = false">关闭</el-button>
         <el-button type="primary" :loading="uploading" @click="submitUpload">上传</el-button>
       </template>
     </el-dialog>

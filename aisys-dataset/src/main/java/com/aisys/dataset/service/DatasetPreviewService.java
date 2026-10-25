@@ -54,7 +54,6 @@ public class DatasetPreviewService {
 
     private static final Set<String> IMG_EXT =
             new LinkedHashSet<>(Arrays.asList("jpg", "jpeg", "png", "bmp", "webp"));
-    private static final int MAX_TOTAL = 5000;
 
     private final S3StorageService s3;
     private final ObjectMapper objectMapper;
@@ -97,15 +96,15 @@ public class DatasetPreviewService {
     }
 
     private Preview previewZip(Path tmp, Long datasetId, Long versionId, int page, int size) throws IOException {
-        try (ZipFile zf = new ZipFile(tmp.toFile())) {
+        try (ZipFile zf = ZipArchives.open(tmp)) {
             ZipEntry dataYaml = findEntry(zf, "data.yaml");
             YoloMeta meta = dataYaml != null ? parseYoloMeta(readEntry(zf, dataYaml)) : new YoloMeta();
             List<ImageSample> samples = enumerateImageSamples(zf, meta);
             long total = samples.size();
             List<String> columns = Arrays.asList("id", "file", "width", "height", "annotations", "split");
             List<Map<String, Object>> rows = new ArrayList<>();
-            int from = (page - 1) * size;
-            for (int i = from; i < Math.min(from + size, samples.size()); i++) {
+            long from = (long) (page - 1) * size;
+            for (int i = (int) Math.min(from, samples.size()); i < Math.min(from + size, samples.size()); i++) {
                 ImageSample s = samples.get(i);
                 Dimension dim = readDim(zf, s.entry());
                 int ann = dataYaml != null ? countYoloAnnotations(zf, s.entry()) : cocoOrZeroAnn(zf, s, dataYaml);
@@ -142,7 +141,7 @@ public class DatasetPreviewService {
             tmp = download(fullKey);
             String fmt = detectFormat(headOf(tmp), fullKey, datasetFormat);
             if (!"zip".equals(fmt)) return null;
-            try (ZipFile zf = new ZipFile(tmp.toFile())) {
+            try (ZipFile zf = ZipArchives.open(tmp)) {
                 ZipEntry dataYaml = findEntry(zf, "data.yaml");
                 YoloMeta meta = dataYaml != null ? parseYoloMeta(readEntry(zf, dataYaml)) : new YoloMeta();
                 List<ImageSample> samples = enumerateImageSamples(zf, meta);
@@ -183,21 +182,29 @@ public class DatasetPreviewService {
     }
 
     private Statistics statisticsZip(Path tmp, Long fileSize) throws IOException {
-        try (ZipFile zf = new ZipFile(tmp.toFile())) {
+        try (ZipFile zf = ZipArchives.open(tmp)) {
+            long totalSize = 0;
+            int fileCount = 0;
+            Enumeration<? extends ZipEntry> entries = zf.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (!entry.isDirectory()) {
+                    fileCount++;
+                    totalSize += Math.max(0, entry.getSize());
+                }
+            }
             ZipEntry dataYaml = findEntry(zf, "data.yaml");
             ZipEntry cocoJson = (dataYaml == null) ? findCocoJson(zf) : null;
-            if (cocoJson != null) return statisticsCoco(zf, cocoJson, fileSize);
+            if (cocoJson != null) return statisticsCoco(zf, cocoJson, fileSize, fileCount, totalSize);
             YoloMeta meta = dataYaml != null ? parseYoloMeta(readEntry(zf, dataYaml)) : new YoloMeta();
             List<ImageSample> samples = enumerateImageSamples(zf, meta);
             int sampleCount = samples.size();
-            long totalSize = 0;
             Map<String, Long> splitDist = new LinkedHashMap<>();
             Map<String, Long> imageSizeDist = new LinkedHashMap<>();
             Map<String, Long> classDist = new LinkedHashMap<>();
             Map<String, Long> objectSizeDist = new LinkedHashMap<>();
             long totalAnn = 0;
             for (ImageSample s : samples) {
-                totalSize += s.sizeBytes() > 0 ? s.sizeBytes() : 0;
                 splitDist.merge(s.split(), 1L, Long::sum);
                 Dimension dim = readDim(zf, s.entry());
                 imageSizeDist.merge(imageSizeBucket(dim.width, dim.height), 1L, Long::sum);
@@ -214,18 +221,18 @@ public class DatasetPreviewService {
                 }
             }
             if (totalSize <= 0) totalSize = fileSize == null ? 0 : fileSize;
-            Double avg = sampleCount > 0 ? (double) totalAnn / sampleCount : null;
+            Double avg = dataYaml != null && sampleCount > 0 ? (double) totalAnn / sampleCount : null;
             Integer classesCount = dataYaml != null
                     ? (meta.names.isEmpty() ? (classDist.isEmpty() ? null : classDist.size()) : meta.names.size())
                     : (classDist.isEmpty() ? null : classDist.size());
-            return new Statistics((long) sampleCount, totalSize, null, classDist, null,
-                    (long) sampleCount, sampleCount, totalSize, classesCount, totalAnn, avg,
+            return new Statistics((long) sampleCount, fileSize, null, classDist, null,
+                    (long) sampleCount, fileCount, totalSize, classesCount, dataYaml != null ? totalAnn : null, avg,
                     splitDist, imageSizeDist, dataYaml != null ? objectSizeDist : null);
         }
     }
 
     @SuppressWarnings("unchecked")
-    private Statistics statisticsCoco(ZipFile zf, ZipEntry jsonEntry, Long fileSize) throws IOException {
+    private Statistics statisticsCoco(ZipFile zf, ZipEntry jsonEntry, Long fileSize, int fileCount, long totalSize) throws IOException {
         Map<Object, int[]> imageAnnCount = new LinkedHashMap<>(); // imageId -> [count]
         Map<Object, Dimension> imageDim = new LinkedHashMap<>();
         Map<String, Long> classDist = new LinkedHashMap<>();
@@ -273,9 +280,8 @@ public class DatasetPreviewService {
         for (Dimension d : imageDim.values()) imageSizeDist.merge(imageSizeBucket(d.width, d.height), 1L, Long::sum);
         Double avg = imageCount > 0 ? (double) totalAnn / imageCount : null;
         Integer classesCount = catName.isEmpty() ? null : catName.size();
-        long totalSize = fileSize == null ? 0 : fileSize;
-        return new Statistics((long) imageCount, totalSize, null, classDist, null,
-                (long) imageCount, imageCount, totalSize, classesCount, totalAnn, avg,
+        return new Statistics((long) imageCount, fileSize, null, classDist, null,
+                (long) imageCount, fileCount, totalSize, classesCount, totalAnn, avg,
                 null, imageSizeDist, objectSizeDist);
     }
 
@@ -291,11 +297,10 @@ public class DatasetPreviewService {
             boolean isCsv = explicitCsv != null || (!first.trim().startsWith("{") && first.contains(","));
             List<String> headers = isCsv ? parseCsvLine(first) : null;
             int labelIdx = isCsv ? labelColumnIndex(headers) : -1;
-            String line;
-            while ((line = reader.readLine()) != null) {
+            String line = isCsv ? reader.readLine() : first;
+            for (; line != null; line = reader.readLine()) {
                 if (line.isBlank()) continue;
                 rows++;
-                if (rows >= MAX_TOTAL) break;
                 if (isCsv) {
                     List<String> vals = parseCsvLine(line);
                     if (labelIdx >= 0 && labelIdx < vals.size()) classDist.merge(vals.get(labelIdx), 1L, Long::sum);
@@ -410,7 +415,7 @@ public class DatasetPreviewService {
     private List<ImageSample> enumerateImageSamples(ZipFile zf, YoloMeta meta) {
         List<ImageSample> out = new ArrayList<>();
         Enumeration<? extends ZipEntry> it = zf.entries();
-        while (it.hasMoreElements() && out.size() < MAX_TOTAL) {
+        while (it.hasMoreElements()) {
             ZipEntry e = it.nextElement();
             if (e.isDirectory() || !IMG_EXT.contains(extOf(e.getName()))) continue;
             int idx = out.size();
@@ -496,14 +501,17 @@ public class DatasetPreviewService {
     private Dimension readDim(ZipFile zf, String entryName) {
         ZipEntry e = zf.getEntry(entryName);
         if (e == null) return new Dimension(0, 0);
-        try (ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(readEntry(zf, e)))) {
+        try (InputStream in = zf.getInputStream(e);
+             ImageInputStream iis = ImageIO.createImageInputStream(in)) {
             Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
             if (readers.hasNext()) {
                 ImageReader r = readers.next();
-                r.setInput(iis);
-                Dimension d = new Dimension(r.getWidth(0), r.getHeight(0));
-                r.dispose();
-                return d;
+                try {
+                    r.setInput(iis);
+                    return new Dimension(r.getWidth(0), r.getHeight(0));
+                } finally {
+                    r.dispose();
+                }
             }
         } catch (Exception ignore) {}
         return new Dimension(0, 0);
@@ -643,7 +651,7 @@ public class DatasetPreviewService {
             String header = reader.readLine();
             if (header == null) return new Preview(columns, rows, 0);
             columns.addAll(parseCsvLine(header));
-            int from = (page - 1) * size;
+            long from = (long) (page - 1) * size;
             String line;
             int idx = 0;
             while ((line = reader.readLine()) != null) {
@@ -655,7 +663,6 @@ public class DatasetPreviewService {
                     rows.add(row);
                 }
                 idx++;
-                if (idx >= MAX_TOTAL) break;
             }
             total = idx;
         }
@@ -687,7 +694,7 @@ public class DatasetPreviewService {
         long total = 0;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new BufferedInputStream(Files.newInputStream(tmp)), StandardCharsets.UTF_8))) {
-            int from = (page - 1) * size;
+            long from = (long) (page - 1) * size;
             String line;
             int idx = 0;
             while ((line = reader.readLine()) != null) {
@@ -697,7 +704,6 @@ public class DatasetPreviewService {
                 Map<String, Object> row = parseJsonObject(line, columns);
                 if (row != null) rows.add(row);
                 idx++;
-                if (total >= MAX_TOTAL) break;
             }
         }
         if (columns.isEmpty()) columns.add("value");
@@ -730,9 +736,9 @@ public class DatasetPreviewService {
         try (InputStream in = Files.newInputStream(tmp)) {
             List<Object> arr = objectMapper.readValue(in, List.class);
             if (arr == null) return new Preview(columns, rows, 0);
-            total = Math.min(arr.size(), MAX_TOTAL);
-            int from = (page - 1) * size;
-            for (int i = from; i < Math.min(from + size, (int) total); i++) {
+            total = arr.size();
+            long from = (long) (page - 1) * size;
+            for (int i = (int) Math.min(from, total); i < Math.min(from + size, total); i++) {
                 Object o = arr.get(i);
                 if (o instanceof Map<?, ?> mp) {
                     Map<String, Object> row = new LinkedHashMap<>();
@@ -761,7 +767,7 @@ public class DatasetPreviewService {
         long total = 0;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new BufferedInputStream(Files.newInputStream(tmp)), StandardCharsets.UTF_8))) {
-            int from = (page - 1) * size;
+            long from = (long) (page - 1) * size;
             String line;
             int idx = 0;
             while ((line = reader.readLine()) != null) {
@@ -772,7 +778,6 @@ public class DatasetPreviewService {
                     rows.add(row);
                 }
                 idx++;
-                if (total >= MAX_TOTAL) break;
             }
         } catch (Exception ignore) {}
         return new Preview(columns, rows, total);

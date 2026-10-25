@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 /**
  * 上传任务 DTO（大文件分片：浏览器→后端→存储池；DDD 5.8）。
@@ -50,6 +51,7 @@ public final class UploadTaskDtos {
             long chunkSize,
             int totalChunks,
             int receivedChunks,
+            List<Integer> receivedPartNumbers,
             String status,        // UPLOADING / PROCESSING / COMPLETED / FAILED
             String finalKey,
             String errorMsg,

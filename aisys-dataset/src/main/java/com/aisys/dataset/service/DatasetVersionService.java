@@ -14,15 +14,24 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Locale;
+import java.util.Set;
+import java.util.zip.ZipFile;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,17 +54,24 @@ public class DatasetVersionService {
     private final S3StorageService s3;
     private final ObjectMapper objectMapper;
     private final DatasetPreviewService previewService;
+    private final TimeSeriesPreviewService timeSeriesService;
+    private final TransactionTemplate readTransaction;
 
     public DatasetVersionService(DatasetMapper datasetMapper,
                                  DatasetVersionMapper versionMapper,
                                  S3StorageService s3,
                                  ObjectMapper objectMapper,
-                                 DatasetPreviewService previewService) {
+                                 DatasetPreviewService previewService,
+                                 PlatformTransactionManager transactionManager,
+                                 TimeSeriesPreviewService timeSeriesService) {
         this.datasetMapper = datasetMapper;
         this.versionMapper = versionMapper;
         this.s3 = s3;
         this.objectMapper = objectMapper;
         this.previewService = previewService;
+        this.timeSeriesService = timeSeriesService;
+        this.readTransaction = new TransactionTemplate(transactionManager);
+        this.readTransaction.setReadOnly(true);
     }
 
     @Transactional(readOnly = true)
@@ -107,20 +123,30 @@ public class DatasetVersionService {
      * 返回 {columns, rows, total}。委托 {@link DatasetPreviewService}，不在事务内持有 S3 流。
      * 参考 refs/aisys 预览语义：目标检测给出 [id,file,width,height,annotations,split] 等结构化列。
      */
-    public DatasetVersionDtos.Preview preview(Long datasetId, Long versionId, int page, int size) {
-        DatasetVersion v = ensureVersion(datasetId, versionId);
-        if (!"ready".equals(v.getStatus())) {
-            throw new BusinessException(DatasetErrorCode.VERSION_NOT_READY);
-        }
-        Dataset ds = ensureDataset(datasetId);
+    public DatasetVersionDtos.Preview preview(Long datasetId, Long versionId, int page, int size,
+                                              String split, String label, String keyword) {
+        PreviewContext context = previewContext(datasetId, versionId);
+        DatasetVersion v = context.version();
+        Dataset ds = context.dataset();
         String key = fullKey(v.getTenantId(), v.getStoragePath());
+        if ("time_series".equals(ds.getTaskType())) return timeSeriesService.preview(key, page, size, split, label, keyword);
         return previewService.preview(key, ds.getFormat(), datasetId, versionId, page, size);
+    }
+
+    public DatasetVersionDtos.TimeSeriesSample timeSeriesSample(Long datasetId, Long versionId, int index) {
+        PreviewContext context = previewContext(datasetId, versionId);
+        if (!"time_series".equals(context.dataset().getTaskType())) {
+            throw new BusinessException(CommonErrorCode.BAD_REQUEST, "该数据集不是时序数据集");
+        }
+        DatasetVersion v = context.version();
+        return timeSeriesService.sample(fullKey(v.getTenantId(), v.getStoragePath()), index);
     }
 
     /** 单样本图片字节（预览的 row.url 指向；前端鉴权 blob 加载）。 */
     public DatasetPreviewService.ImageData sampleImage(Long datasetId, Long versionId, int index) {
-        DatasetVersion v = ensureVersion(datasetId, versionId);
-        Dataset ds = ensureDataset(datasetId);
+        PreviewContext context = previewContext(datasetId, versionId);
+        DatasetVersion v = context.version();
+        Dataset ds = context.dataset();
         String key = fullKey(v.getTenantId(), v.getStoragePath());
         return previewService.sampleImage(key, ds.getFormat(), index);
     }
@@ -130,15 +156,27 @@ public class DatasetVersionService {
      * 落库的 rowCount/fileSize/columnInfo/checksum 作为兜底与表格类格式的数据源。
      */
     public DatasetVersionDtos.Statistics statistics(Long datasetId, Long versionId) {
-        DatasetVersion v = ensureVersion(datasetId, versionId);
-        if (!"ready".equals(v.getStatus())) {
-            throw new BusinessException(DatasetErrorCode.VERSION_NOT_READY);
-        }
-        Dataset ds = ensureDataset(datasetId);
+        PreviewContext context = previewContext(datasetId, versionId);
+        DatasetVersion v = context.version();
+        Dataset ds = context.dataset();
         String key = fullKey(v.getTenantId(), v.getStoragePath());
         Object columnInfo = parseColumnInfo(v.getColumnInfo());
+        if ("time_series".equals(ds.getTaskType())) return timeSeriesService.statistics(key, v.getFileSize(), v.getChecksum());
         return previewService.statistics(key, ds.getFormat(), v.getFileSize(), v.getRowCount(), columnInfo, v.getChecksum());
     }
+
+    /** SET LOCAL tenant context must cover the metadata queries, but not the S3 download. */
+    private PreviewContext previewContext(Long datasetId, Long versionId) {
+        return readTransaction.execute(status -> {
+            DatasetVersion v = ensureVersion(datasetId, versionId);
+            if (!"ready".equals(v.getStatus())) {
+                throw new BusinessException(DatasetErrorCode.VERSION_NOT_READY);
+            }
+            return new PreviewContext(v, ensureDataset(datasetId));
+        });
+    }
+
+    private record PreviewContext(DatasetVersion version, Dataset dataset) {}
 
     @Transactional
     public void delete(Long datasetId, Long versionId) {
@@ -151,6 +189,7 @@ public class DatasetVersionService {
             log.warn("删除版本对象失败 path={}：{}", key, e.getMessage());
         }
         versionMapper.deleteById(versionId);
+        datasetMapper.refreshSampleCount(datasetId);
     }
 
     /** 单个版本详情。 */
@@ -181,7 +220,7 @@ public class DatasetVersionService {
         long rows;
         List<String> columns;
         try (InputStream in = s3.getStream(s3.bucket(), key)) {
-            VersionStats vs = computeStats(in);
+            VersionStats vs = computeStats(in, ensureDataset(datasetId));
             rows = vs.rows();
             columns = vs.columns();
         } catch (Exception e) {
@@ -189,14 +228,41 @@ public class DatasetVersionService {
             throw new BusinessException(DatasetErrorCode.PREVIEW_FAILED);
         }
         versionMapper.updateStatus(versionId, "ready", size, null, rows, buildColumnInfoJson(columns));
+        datasetMapper.refreshSampleCount(datasetId);
         return toResponse(versionMapper.selectById(versionId));
     }
 
     /** 统计输入流的行数与列名（jsonl：首行收集列名）。 */
-    private VersionStats computeStats(InputStream in) throws IOException {
+    private VersionStats computeStats(InputStream in, Dataset dataset) throws IOException {
+        if ("time_series".equals(dataset.getTaskType())) {
+            TimeSeriesPreviewService.UploadSummary summary = timeSeriesService.inspect(in, "signal." + dataset.getFormat());
+            return new VersionStats(summary.samples(), summary.columns());
+        }
+        BufferedInputStream buffered = new BufferedInputStream(in);
+        buffered.mark(4);
+        byte[] magic = buffered.readNBytes(4);
+        buffered.reset();
+        if (magic.length == 4 && magic[0] == 'P' && magic[1] == 'K'
+                && (magic[2] == 3 || magic[2] == 5 || magic[2] == 7)) {
+            // ZIP is binary. Read its directory rather than decoding GBs of image data as JSONL.
+            Path tmp = Files.createTempFile("ds-upload-stats-", ".zip");
+            try {
+                Files.copy(buffered, tmp, StandardCopyOption.REPLACE_EXISTING);
+                Set<String> extensions = Set.of("jpg", "jpeg", "png", "bmp", "webp");
+                try (ZipFile zip = ZipArchives.open(tmp)) {
+                    long images = zip.stream().filter(entry -> !entry.isDirectory()).filter(entry -> {
+                        String name = entry.getName().toLowerCase(Locale.ROOT);
+                        return extensions.contains(name.substring(name.lastIndexOf('.') + 1));
+                    }).count();
+                    return new VersionStats(images, List.of("id", "file", "width", "height", "annotations", "split"));
+                }
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
+        }
         long rows = 0;
         List<String> columns = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(buffered, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) continue;
@@ -248,11 +314,12 @@ public class DatasetVersionService {
             long rows;
             List<String> columns;
             try (InputStream in = s3.getStream(s3.bucket(), key)) {
-                VersionStats vs = computeStats(in);
+                VersionStats vs = computeStats(in, dataset);
                 rows = vs.rows();
                 columns = vs.columns();
             }
             versionMapper.updateStatus(v.getId(), "ready", size, null, rows, buildColumnInfoJson(columns));
+            datasetMapper.refreshSampleCount(datasetId);
         } catch (Exception e) {
             log.error("uploadAndComplete 存储失败 path={}", key, e);
             // 对象已写入但后续统计失败 → 事务回滚会删 DB 行，需尽力删 S3 对象避免孤儿泄漏

@@ -57,6 +57,13 @@ public final class DatasetVersionDtos {
             long total
     ) {}
 
+    public record SignalChannel(String name, List<Double> values, long validCount, long missingCount,
+                                Double min, Double max, Double mean, Double std, Double rms) {}
+
+    public record TimeSeriesSample(int id, String file, String path, String split, String label,
+                                   int pointCount, String axisName, String axisKind, List<Double> axis,
+                                   List<SignalChannel> channels, List<String> warnings) {}
+
     /**
      * 统计响应（多维，参考 refs/aisys StatisticsResponse）。
      * 旧字段 rowCount/fileSize/columnInfo/checksum 保留兼容；新增 9 维覆盖样本/文件/大小/类别/标注/划分/图像尺寸/目标尺寸。

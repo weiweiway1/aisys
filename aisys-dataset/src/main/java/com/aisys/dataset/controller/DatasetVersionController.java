@@ -44,8 +44,17 @@ public class DatasetVersionController {
             @PathVariable Long datasetId,
             @PathVariable Long versionId,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(versionService.preview(datasetId, versionId, page, size));
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String split,
+            @RequestParam(required = false) String label,
+            @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(versionService.preview(datasetId, versionId, page, size, split, label, keyword));
+    }
+
+    @GetMapping("/{versionId}/samples/{index}/series")
+    public ApiResponse<DatasetVersionDtos.TimeSeriesSample> timeSeriesSample(
+            @PathVariable Long datasetId, @PathVariable Long versionId, @PathVariable int index) {
+        return ApiResponse.success(versionService.timeSeriesSample(datasetId, versionId, index));
     }
 
     @GetMapping("/{versionId}/statistics")

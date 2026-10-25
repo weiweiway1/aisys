@@ -30,5 +30,8 @@ public interface DatasetMapper {
 
     int update(Dataset dataset);
 
+    /** Samples in the most recently created ready version. */
+    int refreshSampleCount(@Param("id") Long id);
+
     int softDelete(@Param("id") Long id);
 }

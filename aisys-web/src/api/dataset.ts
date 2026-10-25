@@ -134,14 +134,45 @@ export const getDatasetVersions = (id: string | number) => {
 export const getDatasetVersionPreview = (
   id: string | number,
   versionId: string | number,
-  params?: { page?: number; size?: number }
+  params?: { page?: number; size?: number; split?: string; label?: string; keyword?: string }
 ) => {
   return http.request<Result>(
     "get",
     `/api/v1/datasets/${id}/versions/${versionId}/preview`,
-    { params }
+    { params, timeout: 300000 }
   );
 };
+
+export interface SignalChannel {
+  name: string;
+  values: (number | null)[];
+  validCount: number;
+  missingCount: number;
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  std: number | null;
+  rms: number | null;
+}
+
+export interface TimeSeriesSample {
+  id: number;
+  file: string;
+  path: string;
+  split: string;
+  label: string;
+  pointCount: number;
+  axisName: string;
+  axisKind: "index" | "time";
+  axis: number[];
+  channels: SignalChannel[];
+  warnings: string[];
+}
+
+export const getTimeSeriesSample = (id: string | number, versionId: string | number, index: number) =>
+  http.request<{ code: number; message: string; data: TimeSeriesSample }>(
+    "get", `/api/v1/datasets/${id}/versions/${versionId}/samples/${index}/series`, { timeout: 300000 }
+  );
 
 /**
  * 取单样本图片（鉴权 XHR blob → objectURL；预览图片网格用）。
@@ -221,7 +252,8 @@ export const completeDatasetVersion = (
 ) => {
   return http.request<Result>(
     "post",
-    `/api/v1/datasets/${id}/versions/${versionId}/complete`
+    `/api/v1/datasets/${id}/versions/${versionId}/complete`,
+    { timeout: 300000 }
   );
 };
 
@@ -232,7 +264,8 @@ export const getDatasetVersionStatistics = (
 ) => {
   return http.request<Result>(
     "get",
-    `/api/v1/datasets/${id}/versions/${versionId}/statistics`
+    `/api/v1/datasets/${id}/versions/${versionId}/statistics`,
+    { timeout: 300000 }
   );
 };
 

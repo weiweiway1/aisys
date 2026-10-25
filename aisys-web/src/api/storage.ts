@@ -117,7 +117,8 @@ export const initiateUploadTask = (data: {
 export const completeUploadTask = (taskId: number | string) => {
   return http.request<Result>(
     "post",
-    `/api/v1/files/upload-tasks/${taskId}/complete`
+    `/api/v1/files/upload-tasks/${taskId}/complete`,
+    { timeout: 300000 }
   );
 };
 
@@ -220,20 +221,40 @@ export const uploadTaskChunk = (
       "POST",
       `/api/v1/files/upload-tasks/${taskId}/chunks/${partNumber}`
     );
+    xhr.timeout = 10 * 60 * 1000;
+    // Covers stalled requests, including a request queued by the browser.
+    let idleTimer: ReturnType<typeof setTimeout>;
+    const touch = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => xhr.abort(), 60000);
+    };
     const t = getToken();
     if (t?.accessToken)
       xhr.setRequestHeader("Authorization", formatToken(t.accessToken));
-    if (onProgress && xhr.upload) {
-      xhr.upload.onprogress = e => onProgress(e.loaded, e.total);
+    if (xhr.upload) {
+      xhr.upload.onprogress = e => {
+        touch();
+        onProgress?.(e.loaded, e.total);
+      };
     }
     xhr.onload = () => {
+      clearTimeout(idleTimer);
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const error = new Error(`HTTP ${xhr.status}`) as Error & { retryable: boolean };
+        error.retryable = xhr.status === 408 || xhr.status === 429 || xhr.status >= 500;
+        reject(error);
+        return;
+      }
       try {
         resolve(JSON.parse(xhr.responseText));
       } catch (e) {
         reject(e);
       }
     };
-    xhr.onerror = () => reject(new Error("分片上传失败"));
+    xhr.onerror = () => { clearTimeout(idleTimer); reject(new Error("分片上传网络错误")); };
+    xhr.ontimeout = () => { clearTimeout(idleTimer); reject(new Error("分片上传超时")); };
+    xhr.onabort = () => { clearTimeout(idleTimer); reject(new Error("分片上传长时间无响应")); };
+    touch();
     xhr.send(form);
   });
 };

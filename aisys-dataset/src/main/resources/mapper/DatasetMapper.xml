@@ -80,4 +80,13 @@
     <update id="softDelete">
         UPDATE dataset SET status = 'deleted', updated_at = NOW() WHERE id = #{id}
     </update>
+
+    <update id="refreshSampleCount">
+        UPDATE dataset SET sample_count = COALESCE((
+            SELECT row_count FROM dataset_version
+            WHERE dataset_id = #{id} AND status = 'ready'
+            ORDER BY created_at DESC, id DESC LIMIT 1
+        ), 0), updated_at = NOW()
+        WHERE id = #{id}
+    </update>
 </mapper>

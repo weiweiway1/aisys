@@ -260,6 +260,8 @@ public class UploadTaskService {
                 t.getChunkSize() == null ? 0 : t.getChunkSize(),
                 t.getTotalChunks() == null ? 0 : t.getTotalChunks(),
                 t.getReceivedChunks() == null ? 0 : t.getReceivedChunks(),
+                readParts(t.getParts()).stream()
+                        .map(p -> ((Number) p.get("partNumber")).intValue()).sorted().toList(),
                 t.getStatus(), t.getFinalKey(), t.getErrorMsg(), t.getCreatedAt(), t.getUpdatedAt());
     }
 }
